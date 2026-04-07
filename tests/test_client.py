@@ -242,7 +242,10 @@ class TestCurlFallback:
         assert cmd[0] == "curl"
         assert "-sk" in cmd
         assert "https://relay.example.com/v1/messages" in cmd
-        assert "-H" in cmd
+        assert "--config" in cmd
+        assert "-" in cmd
+        config_input = mock_run.call_args[1].get("input", "")
+        assert "x-api-key: sk-test" in config_input
 
 
 # ---------------------------------------------------------------------------

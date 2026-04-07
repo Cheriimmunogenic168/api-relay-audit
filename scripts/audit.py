@@ -11,6 +11,7 @@ Usage:
 
 import argparse
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -56,36 +57,39 @@ def run_cmd(cmd, timeout=10):
 def test_infrastructure(base_url, report):
     report.h2("1. Infrastructure Recon")
     domain = urlparse(base_url).hostname
+    q_domain = shlex.quote(domain)
+    q_url = shlex.quote(base_url)
 
     # DNS
     report.h3("1.1 DNS Records")
     for rtype in ["A", "CNAME", "NS"]:
-        result = run_cmd(f"dig +short {domain} {rtype} 2>/dev/null || nslookup -type={rtype} {domain} 2>/dev/null")
+        result = run_cmd(f"dig +short {q_domain} {rtype} 2>/dev/null || nslookup -type={rtype} {q_domain} 2>/dev/null")
         report.p(f"**{rtype}**: `{result or '(empty)'}`")
 
     # WHOIS
     report.h3("1.2 WHOIS")
     parts = domain.split(".")
     main_domain = ".".join(parts[-2:]) if len(parts) >= 2 else domain
-    whois = run_cmd(f"whois {main_domain} 2>/dev/null | head -30")
+    q_main_domain = shlex.quote(main_domain)
+    whois = run_cmd(f"whois {q_main_domain} 2>/dev/null | head -30")
     report.code(whois) if whois else report.p("whois not available")
 
     # SSL
     report.h3("1.3 SSL Certificate")
     ssl_info = run_cmd(
-        f"echo | openssl s_client -connect {domain}:443 -servername {domain} 2>/dev/null "
+        f"echo | openssl s_client -connect {q_domain}:443 -servername {q_domain} 2>/dev/null "
         f"| openssl x509 -noout -subject -issuer -dates -ext subjectAltName 2>/dev/null"
     )
     report.code(ssl_info) if ssl_info else report.p("Unable to retrieve SSL certificate")
 
     # HTTP headers
     report.h3("1.4 HTTP Response Headers")
-    headers = run_cmd(f"curl -sI {base_url} 2>/dev/null | head -20")
+    headers = run_cmd(f"curl -sI {q_url} 2>/dev/null | head -20")
     report.code(headers) if headers else report.p("Unable to retrieve response headers")
 
     # System identification
     report.h3("1.5 System Identification")
-    homepage = run_cmd(f"curl -s {base_url} 2>/dev/null | head -5")
+    homepage = run_cmd(f"curl -s {q_url} 2>/dev/null | head -5")
     if homepage:
         report.code(homepage[:500])
 

@@ -65,11 +65,11 @@ class APIClient:
     # -- Low-level transport --------------------------------------------------
 
     def _curl_post(self, url: str, headers: dict, body: dict) -> dict:
-        cmd = ["curl", "-sk", "-X", "POST", url, "--max-time", str(self.timeout)]
-        for k, v in headers.items():
-            cmd.extend(["-H", f"{k}: {v}"])
+        cmd = ["curl", "-sk", "-X", "POST", url, "--max-time", str(self.timeout),
+               "--config", "-"]
         cmd.extend(["-d", json.dumps(body)])
-        r = subprocess.run(cmd, capture_output=True, text=True,
+        config = "\n".join(f'header = "{k}: {v}"' for k, v in headers.items())
+        r = subprocess.run(cmd, capture_output=True, text=True, input=config,
                            timeout=self.timeout + 10)
         if r.returncode != 0:
             raise RuntimeError(f"curl failed: {r.stderr[:200]}")
@@ -274,10 +274,9 @@ class APIClient:
         for headers in auth_variants:
             try:
                 if self._use_curl:
-                    cmd = ["curl", "-sk", url, "--max-time", "15"]
-                    for k, v in headers.items():
-                        cmd.extend(["-H", f"{k}: {v}"])
-                    r = subprocess.run(cmd, capture_output=True, text=True, timeout=25)
+                    cmd = ["curl", "-sk", url, "--max-time", "15", "--config", "-"]
+                    config = "\n".join(f'header = "{k}: {v}"' for k, v in headers.items())
+                    r = subprocess.run(cmd, capture_output=True, text=True, input=config, timeout=25)
                     if r.returncode == 0:
                         data = json.loads(r.stdout).get("data", [])
                         if data:
