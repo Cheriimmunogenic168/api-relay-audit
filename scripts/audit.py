@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
-API Relay Security Audit Tool v2.0
+API Relay Security Audit Tool v2.1
 
-Full 7-step audit: infrastructure, models, token injection, prompt extraction,
-instruction conflict, jailbreak, and context length testing.
+Full 8-step audit: infrastructure, models, token injection, prompt extraction,
+instruction conflict, jailbreak, context length, and tool-call package
+substitution (AC-1.a). Threat taxonomy follows Liu et al., *Your Agent Is
+Mine*, arXiv:2604.08407.
 
 Usage:
   python scripts/audit.py --key YOUR_KEY --url https://relay.example.com/v1 --model claude-opus-4-6
@@ -24,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from api_relay_audit.client import APIClient
 from api_relay_audit.context import run_context_scan
 from api_relay_audit.reporter import Reporter
+from api_relay_audit.tool_substitution import run_tool_substitution_test
 
 
 # ============================================================
@@ -37,9 +40,29 @@ def parse_args():
     p.add_argument("--model", default="claude-opus-4-6", help="Model name")
     p.add_argument("--skip-infra", action="store_true", help="Skip infrastructure recon")
     p.add_argument("--skip-context", action="store_true", help="Skip context length test")
+    p.add_argument("--skip-tool-substitution", action="store_true",
+                   help="Skip tool-call package substitution test (AC-1.a)")
+    p.add_argument("--warmup", type=int, default=0, metavar="N",
+                   help="Send N benign requests before the audit to mitigate "
+                        "request-count-gated backdoors (AC-1.b). Default: 0")
     p.add_argument("--timeout", type=int, default=120, help="Request timeout in seconds")
     p.add_argument("--output", default=None, help="Report output path (markdown)")
     return p.parse_args()
+
+
+def run_warmup(client, n):
+    """Send N benign requests before the audit to step past request-count gates
+    used by some AC-1.b conditional-delivery routers."""
+    if n <= 0:
+        return
+    print(f"  Warm-up: sending {n} benign requests to mitigate AC-1.b gating...")
+    for i in range(n):
+        client.call(
+            [{"role": "user", "content": "Reply with the single word: ok"}],
+            max_tokens=10,
+        )
+        time.sleep(0.2)
+    print("  Warm-up complete")
 
 
 def run_cmd(cmd, timeout=10):
@@ -299,6 +322,72 @@ def test_jailbreak(client, report):
     print(f"  Done: jailbreak tests (leaked keywords: {len(set(leaked_keywords))})")
 
 
+def test_tool_substitution(client, report):
+    report.h2("8. Tool-Call Package Substitution (AC-1.a)")
+    report.p(
+        "Ask the model to echo exact package-install commands and verify "
+        "character-level integrity on the return path. A malicious middleware "
+        "running AC-1.a rewrites package names (e.g. `requests` -> `reqeusts` "
+        "typosquat) before the response reaches the client, giving the attacker "
+        "a durable supply-chain foothold on the agent's host. "
+        "Reference: Liu et al., *Your Agent Is Mine*, arXiv:2604.08407 section 4.2.1.\n"
+    )
+    report.p(
+        "Limitation: this is a text-echo surrogate. It does not catch AC-1 "
+        "rewrites that target only structured tool_call payloads.\n"
+    )
+
+    results, detected, inconclusive = run_tool_substitution_test(client, sleep=1.0)
+
+    report.p("| Manager | Expected | Received | Verdict |")
+    report.p("|---------|----------|----------|---------|")
+    error_count = 0
+    for r in results:
+        expected = r["expected"]
+        if r["verdict"] == "error":
+            error_count += 1
+            err_short = (r.get("error") or "")[:60].replace("|", "\\|").replace("\n", " ")
+            received_cell = f"ERROR: {err_short}"
+            icon = "\u26aa skipped"
+        else:
+            disp = r["received"][:80].replace("|", "\\|").replace("\n", " ")
+            received_cell = f"`{disp}`"
+            if r["verdict"] == "exact":
+                icon = "\U0001f7e2 exact"
+            elif r["verdict"] == "whitespace":
+                icon = "\U0001f7e1 whitespace"
+            else:
+                icon = "\U0001f534 SUBSTITUTED"
+        report.p(f"| {r['manager']} | `{expected}` | {received_cell} | {icon} |")
+
+    if detected:
+        subs = sum(1 for r in results if r["verdict"] == "substituted")
+        report.flag(
+            "red",
+            f"Tool-call package substitution detected (AC-1.a): "
+            f"{subs}/{len(results)} probes rewritten on return path",
+        )
+    elif inconclusive:
+        report.flag(
+            "yellow",
+            "Tool-call substitution test INCONCLUSIVE: every probe errored. "
+            "The relay may be blocking plaintext echo -- re-run with a different "
+            "model or consider this a red flag in itself.",
+        )
+    elif error_count > 0:
+        report.flag(
+            "yellow",
+            f"Tool-call substitution test partially skipped "
+            f"({error_count}/{len(results)} probes errored)",
+        )
+    else:
+        report.flag("green", "No tool-call package substitution detected")
+
+    state = "detected" if detected else ("inconclusive" if inconclusive else "clean")
+    print(f"  Done: tool-call substitution ({state})")
+    return detected, inconclusive
+
+
 def test_context_length(client, report):
     report.h2("7. Context Length Test")
     report.p("Place 5 canary markers at equal intervals in long text, check if model can recall all.\n")
@@ -352,58 +441,106 @@ def main():
 
     report.p(f"**Target**: `{client.base_url}`")
     report.p(f"**Model**: `{args.model}`")
+    report.p(
+        "Threat model follows the AC-1 / AC-1.a / AC-1.b / AC-2 taxonomy from "
+        "Liu et al., *Your Agent Is Mine: Measuring Malicious Intermediary "
+        "Attacks on the LLM Supply Chain*, arXiv:2604.08407."
+    )
     report.p("---")
+
+    # Warm-up (partial AC-1.b mitigation)
+    if args.warmup > 0:
+        print(f"[warmup] Sending {args.warmup} benign requests...")
+        run_warmup(client, args.warmup)
+        report.flag(
+            "green",
+            f"Warm-up: {args.warmup} benign calls sent before audit "
+            "(partial AC-1.b request-count-gate mitigation)",
+        )
 
     # 1. Infrastructure
     if not args.skip_infra:
-        print("[1/7] Infrastructure recon...")
+        print("[1/8] Infrastructure recon...")
         test_infrastructure(client.base_url, report)
     else:
-        print("[1/7] Infrastructure recon (skipped)")
+        print("[1/8] Infrastructure recon (skipped)")
 
     # 2. Models
-    print("[2/7] Model list...")
+    print("[2/8] Model list...")
     test_models(client, report)
 
     # 3. Token injection
-    print("[3/7] Token injection detection...")
+    print("[3/8] Token injection detection...")
     injection = test_token_injection(client, report)
 
     # 4. Prompt extraction
-    print("[4/7] Prompt extraction tests...")
+    print("[4/8] Prompt extraction tests...")
     leaked = test_prompt_extraction(client, report)
 
     # 5. Instruction conflict
-    print("[5/7] Instruction conflict tests...")
+    print("[5/8] Instruction conflict tests...")
     overridden = test_instruction_conflict(client, report)
 
     # 6. Jailbreak
-    print("[6/7] Jailbreak tests...")
+    print("[6/8] Jailbreak tests...")
     test_jailbreak(client, report)
 
     # 7. Context length
     if not args.skip_context:
-        print("[7/7] Context length test...")
+        print("[7/8] Context length test...")
         test_context_length(client, report)
     else:
-        print("[7/7] Context length test (skipped)")
+        print("[7/8] Context length test (skipped)")
+
+    # 8. Tool-call package substitution (AC-1.a)
+    substitution_detected = False
+    substitution_inconclusive = False
+    if not args.skip_tool_substitution:
+        print("[8/8] Tool-call substitution test...")
+        substitution_detected, substitution_inconclusive = test_tool_substitution(client, report)
+    else:
+        print("[8/8] Tool-call substitution test (skipped)")
 
     # Overall rating
-    report.h2("8. Overall Rating")
-    if injection > 100 and overridden:
+    # Dimensions:
+    #   D1 = hidden system-prompt injection > 100 tokens   (Step 3)
+    #   D2 = user instructions overridden                  (Step 5)
+    #   D3 = tool-call package substitution detected       (Step 8)
+    #   D3i = Step 8 inconclusive (all probes errored)     (Step 8)
+    # HIGH if D3 alone OR (D1 AND D2); MEDIUM if D1 or D2 or D3i alone; else LOW.
+    report.h2("9. Overall Rating")
+    d1, d2, d3 = injection > 100, overridden, substitution_detected
+    d3i = substitution_inconclusive
+    if d3:
+        report.p("### HIGH RISK\n")
+        report.p(
+            "**Tool-call package substitution detected (AC-1.a).** A malicious "
+            "middleware is rewriting package-install commands on the return path. "
+            "This is a code-execution-level finding: any agent with shell or "
+            "tool-calling access that trusts this relay can be compromised on a "
+            "single `pip install` / `npm install`. **Do not use.**"
+        )
+    elif d1 and d2:
         report.p("### HIGH RISK\n")
         report.p("Hidden injection detected AND user instructions overridden. "
                  "Not suitable for any use case requiring custom behavior.")
-    elif injection > 100:
+    elif d1:
         report.p("### MEDIUM RISK\n")
         report.p("Hidden injection detected but instructions may partially work. "
                  "OK for simple Q&A, not recommended for complex applications.")
-    elif overridden:
+    elif d2:
         report.p("### MEDIUM RISK\n")
         report.p("No significant injection but instruction override detected.")
+    elif d3i:
+        report.p("### MEDIUM RISK\n")
+        report.p("Tool-call substitution test (Step 8) was **inconclusive**: every "
+                 "probe errored, so the relay's AC-1.a behavior could not be verified. "
+                 "Treat as suspicious until Step 8 can complete -- a relay that blocks "
+                 "plaintext echo is itself a red flag.")
     else:
         report.p("### LOW RISK\n")
-        report.p("No significant injection or instruction override detected.")
+        report.p("No significant injection, instruction override, or tool-call "
+                 "substitution detected.")
 
     # Output
     md = report.render(target_url=client.base_url, model=args.model)
