@@ -711,15 +711,21 @@ def _leak_build_triggers(aggressive):
             "application/json",
             None,
         ),
-        # NEW in v1.5: auth header echo probe. Fake bearer with 20+ chars
-        # so the bearer_token regex in LEAK_SECRET_REGEX_PATTERNS will
-        # flag it deterministically if the relay echoes it back.
+        # NEW in v1.5 (fixed in v1.5.2 after Codex review): auth echo probe.
+        # Overrides BOTH Authorization and x-api-key with distinctive fakes
+        # so Anthropic-mode relays (which use x-api-key) cannot silently
+        # authenticate with the real key and skip the 401 echo path.
+        # Fake bearer caught by bearer_token regex; fake x-api-key uses
+        # sk- format so sk_prefix_secret regex catches it if echoed.
         (
             "auth_probe",
             "POST", "/v1/messages",
             valid_body,
             "application/json",
-            {"Authorization": "Bearer nothing-fake-token-xyz-999-auth-probe"},
+            {
+                "Authorization": "Bearer nothing-fake-token-xyz-999-auth-probe",
+                "x-api-key": "sk-fake-xapi-probe-nothing-real-xyz99999",
+            },
         ),
     ]
     if aggressive:
@@ -741,12 +747,21 @@ def _leak_build_triggers(aggressive):
 
 
 def _leak_redact_api_key(text, api_key):
-    """Replace api_key occurrences with <REDACTED_API_KEY>."""
+    """Replace api_key occurrences with <REDACTED_API_KEY>.
+
+    v1.5.2: also greedily consumes trailing key-shape chars after the
+    first-8 prefix, so partials of length 9-20 don't leak into snippets.
+    Codex review fix.
+    """
     if not api_key or not text:
         return text
     text = text.replace(api_key, "<REDACTED_API_KEY>")
     if len(api_key) >= 8:
-        text = text.replace(api_key[:8], "<REDACTED_PREFIX>")
+        text = re.sub(
+            re.escape(api_key[:8]) + r"[A-Za-z0-9\-_]*",
+            "<REDACTED_PREFIX>",
+            text,
+        )
     return text
 
 

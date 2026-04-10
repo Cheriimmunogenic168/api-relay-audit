@@ -122,6 +122,30 @@ class TestScanForLeaks:
         for h in hits:
             assert API_KEY not in h["snippet"]
 
+    def test_partial_key_echo_snippet_fully_redacted(self):
+        """v1.5.2 Codex fix end-to-end: when a relay echoes a 15-char
+        partial of the api_key (more than first-8), the api_key_prefix
+        hit's snippet must NOT leak chars 8-14 via the surrounding
+        context window. Before the fix, _redact_api_key left chars 9-20
+        exposed because it only replaced the strict first-8 substring."""
+        partial_15 = API_KEY[:15]  # "sk-test-abcdefg"
+        extra = API_KEY[8:15]  # "abcdefg"
+        body = (
+            f'{{"error":"unauthorized","hint":"provided key '
+            f'{partial_15}... does not match any channel"}}'
+        )
+        hits = scan_for_leaks(body, {}, API_KEY, "https://relay.example.com")
+        prefix_hits = [h for h in hits if h["kind"] == "api_key_prefix"]
+        assert prefix_hits, "Expected api_key_prefix hit on partial echo"
+        snippet = prefix_hits[0]["snippet"]
+        assert partial_15 not in snippet, (
+            f"Snippet leaked the full 15-char partial: {snippet!r}"
+        )
+        assert extra not in snippet, (
+            f"Snippet leaked chars 8-14 {extra!r}: {snippet!r}"
+        )
+        assert "<REDACTED_PREFIX>" in snippet
+
 
 # ---------------------------------------------------------------------------
 # LiteLLM-ported secret regex patterns (v1.5)
@@ -390,20 +414,30 @@ class TestBuildTriggers:
             assert header_override is None or isinstance(header_override, dict)
 
     def test_only_auth_probe_sets_header_override(self):
-        """v1.5 regression: header_override must be None for every trigger
-        EXCEPT auth_probe. Otherwise unexpected triggers could silently
-        alter the Authorization header."""
+        """v1.5.2 regression: header_override must be None for every trigger
+        EXCEPT auth_probe. auth_probe must override BOTH Authorization AND
+        x-api-key -- otherwise Anthropic-mode relays keep authenticating via
+        the real x-api-key and the 401 echo path never fires. Codex review
+        finding, 2026-04-11."""
         triggers = _build_triggers(aggressive=True)
         for t in triggers:
             name = t[0]
             header_override = t[5]
             if name == "auth_probe":
                 assert header_override is not None
+                # Authorization must be fake bearer
                 assert "Authorization" in header_override
                 assert "Bearer " in header_override["Authorization"]
-                # Must use a distinctive fake value, not a real bearer shape
-                # that could be mistaken for a real leak
                 assert "fake" in header_override["Authorization"].lower()
+                # v1.5.2: x-api-key must ALSO be overridden, or Anthropic-
+                # mode relays never 401 and the probe is silently useless
+                assert "x-api-key" in header_override, (
+                    "auth_probe must override x-api-key too (Codex fix)"
+                )
+                assert "fake" in header_override["x-api-key"].lower()
+                # Fake x-api-key should use sk- shape so existing
+                # sk_prefix_secret regex catches it if echoed
+                assert header_override["x-api-key"].startswith("sk-")
             else:
                 assert header_override is None, (
                     f"Trigger {name} unexpectedly has a header_override"
@@ -470,6 +504,46 @@ class TestRedactApiKey:
 
     def test_empty_key(self):
         assert _redact_api_key("hello", "") == "hello"
+
+    def test_redact_partial_beyond_first8(self):
+        """v1.5.2 Codex fix: a partial echo of length 9-20 (more than
+        first-8 but less than full key) must be FULLY redacted.
+
+        Before the fix, _redact_api_key only replaced the strict first-8
+        substring, leaving chars 9-20 exposed in report snippets. This
+        test enforces the regex-based redaction that greedily consumes
+        trailing key-shape chars after the prefix.
+        """
+        # API_KEY = "sk-test-abcdefgh12345678ijklmnop" (30 chars).
+        # Test a 15-char partial: first-8 + 7 extra key-shape chars.
+        partial_15 = API_KEY[:15]
+        assert len(partial_15) == 15
+        extra = API_KEY[8:15]  # "abcdefg"
+        text = f"here is a hint: {partial_15} check docs"
+        out = _redact_api_key(text, API_KEY)
+        # Full partial must NOT appear in the redacted text
+        assert partial_15 not in out
+        # First-8 must NOT appear
+        assert API_KEY[:8] not in out
+        # Chars 8-14 (the bits beyond first-8) must NOT appear
+        assert extra not in out
+        # Redaction marker must be present
+        assert "<REDACTED_PREFIX>" in out
+        # Context around the redaction must survive (sanity check the
+        # regex didn't eat surrounding text)
+        assert "check docs" in out
+
+    def test_redact_stops_at_non_key_char(self):
+        """The greedy regex must stop at the first non-key-shape
+        character. Dots, slashes, colons, whitespace are NOT in the
+        [A-Za-z0-9_-] class so the regex should stop there."""
+        partial_10 = API_KEY[:10]  # "sk-test-ab"
+        text = f"starts with {partial_10}.example.com/path"
+        out = _redact_api_key(text, API_KEY)
+        assert partial_10 not in out
+        assert "<REDACTED_PREFIX>" in out
+        # Context after the dot must be preserved
+        assert "example.com/path" in out
 
 
 # ---------------------------------------------------------------------------
@@ -687,10 +761,12 @@ class TestRunErrorLeakageTest:
         assert severity == "none"
         assert inconclusive is False
 
-    def test_auth_probe_sends_fake_bearer(self):
-        """v1.5 regression: the auth_probe trigger must send the fake
-        bearer header, NOT the real api_key, so we can detect echo.
-        All other triggers must continue to send the real api_key."""
+    def test_auth_probe_sends_fake_bearer_and_fake_xapi(self):
+        """v1.5.2 regression: the auth_probe trigger must send fake
+        values in BOTH Authorization and x-api-key, NOT the real api_key,
+        so Anthropic-mode relays cannot silently authenticate via the
+        real x-api-key. All other triggers must continue to send the
+        real api_key in both headers. Codex review finding, 2026-04-11."""
         header_sink = {}
         client = _make_client(
             default=make_raw_response(status=400, body='{"error":"bad"}'),
@@ -699,16 +775,28 @@ class TestRunErrorLeakageTest:
         run_error_leakage_test(client, API_KEY, "https://relay.example.com")
 
         assert "auth_probe" in header_sink
-        auth_probe_auth = header_sink["auth_probe"]["Authorization"]
+        auth_probe_headers = header_sink["auth_probe"]
+
+        # Authorization must be fake bearer
+        auth_probe_auth = auth_probe_headers["Authorization"]
         assert API_KEY not in auth_probe_auth
         assert "nothing-fake-token" in auth_probe_auth
 
-        # Every OTHER trigger must have sent the real api_key in Bearer
+        # v1.5.2: x-api-key must ALSO be fake
+        auth_probe_xapi = auth_probe_headers["x-api-key"]
+        assert API_KEY not in auth_probe_xapi
+        assert auth_probe_xapi != API_KEY
+        assert "fake" in auth_probe_xapi.lower()
+
+        # Every OTHER trigger must have sent the real api_key in BOTH headers
         for name, headers in header_sink.items():
             if name == "auth_probe":
                 continue
             assert headers["Authorization"] == f"Bearer {API_KEY}", (
-                f"Trigger {name} did not send real api_key"
+                f"Trigger {name} did not send real api_key in Authorization"
+            )
+            assert headers["x-api-key"] == API_KEY, (
+                f"Trigger {name} did not send real api_key in x-api-key"
             )
 
     def test_auth_probe_echo_detected_as_bearer_token(self):
@@ -757,4 +845,33 @@ class TestRunErrorLeakageTest:
         # triggers the existing upstream_host literal check.
         kinds = {h["kind"] for h in force_result["hits"]}
         assert "upstream_host" in kinds
+        assert severity == "high"
+
+    def test_xapi_key_echo_detected_as_sk_prefix_secret(self):
+        """v1.5.2 Codex fix end-to-end: when a relay 401s and echoes our
+        fake x-api-key back in the body, scan_for_leaks must detect it
+        via the sk_prefix_secret regex (the fake value uses sk- shape
+        deliberately so no new scan category is required)."""
+        rmap = {
+            "auth_probe": make_raw_response(
+                status=401,
+                body=(
+                    '{"error":"invalid x-api-key: '
+                    'sk-fake-xapi-probe-nothing-real-xyz99999"}'
+                ),
+            ),
+        }
+        client = _make_client(
+            response_map=rmap,
+            default=make_raw_response(status=400, body='{"error":"bad"}'),
+        )
+        results, severity, inconclusive = run_error_leakage_test(
+            client, API_KEY, "https://relay.example.com",
+        )
+        auth_result = next(r for r in results if r["trigger"] == "auth_probe")
+        kinds = {h["kind"] for h in auth_result["hits"]}
+        assert "sk_prefix_secret" in kinds
+        # Must NOT be misreported as critical full api_key echo (the echoed
+        # value is the fake, not the user's real api_key)
+        assert "full_api_key_echo" not in kinds
         assert severity == "high"

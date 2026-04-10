@@ -222,17 +222,29 @@ def _build_triggers(aggressive: bool):
             "application/json",
             None,
         ),
-        # NEW in v1.5: auth header echo probe. Sends a distinctive fake
-        # bearer so that if the relay echoes the Authorization header value
-        # into the response body or a response header on a 401, we can spot
-        # it deterministically via the bearer_token regex in
-        # SECRET_REGEX_PATTERNS.
+        # NEW in v1.5 (fixed in v1.5.2 after Codex review): auth header
+        # echo probe. Sends a distinctive fake bearer AND a distinctive fake
+        # x-api-key so that regardless of whether the relay authenticates
+        # via Anthropic-style x-api-key or OpenAI-style Authorization Bearer,
+        # the request fails and we can inspect the 401 body for echo.
+        #
+        # v1.5 bug: header_override only touched Authorization, so
+        # Anthropic-mode relays kept authenticating via the real x-api-key
+        # and the 401 echo path never triggered.
+        #
+        # The fake x-api-key uses sk- format (>20 chars from the class) so
+        # that if echoed, the sk_prefix_secret regex in
+        # SECRET_REGEX_PATTERNS catches it without needing a new scan path.
+        # The fake bearer is caught by bearer_token regex.
         (
             "auth_probe",
             "POST", "/v1/messages",
             valid_body,
             "application/json",
-            {"Authorization": "Bearer nothing-fake-token-xyz-999-auth-probe"},
+            {
+                "Authorization": "Bearer nothing-fake-token-xyz-999-auth-probe",
+                "x-api-key": "sk-fake-xapi-probe-nothing-real-xyz99999",
+            },
         ),
     ]
     if aggressive:
@@ -256,14 +268,25 @@ def _build_triggers(aggressive: bool):
 def _redact_api_key(text: str, api_key: str) -> str:
     """Replace api_key occurrences with ``<REDACTED_API_KEY>``.
 
-    Also redacts the first-8 prefix so report snippets do not accidentally
-    leak partial credentials via truncation.
+    Also redacts the first-8 prefix AND any trailing key-shape characters
+    that follow it, so relays that echo a 12-20 char partial (more than
+    first-8 but less than the full key) cannot leak the middle of the
+    credential through report snippets.
+
+    Fix history: v1.5 only replaced the strict first-8 substring, which
+    left chars 9-20 of a partial echo exposed in report output. Codex
+    review flagged this 2026-04-11; v1.5.2 switches to regex that
+    greedily consumes trailing `[A-Za-z0-9\\-_]` chars after the prefix.
     """
     if not api_key or not text:
         return text
     text = text.replace(api_key, "<REDACTED_API_KEY>")
     if len(api_key) >= 8:
-        text = text.replace(api_key[:8], "<REDACTED_PREFIX>")
+        text = re.sub(
+            re.escape(api_key[:8]) + r"[A-Za-z0-9\-_]*",
+            "<REDACTED_PREFIX>",
+            text,
+        )
     return text
 
 
