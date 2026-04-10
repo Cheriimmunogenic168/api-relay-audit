@@ -6,6 +6,10 @@ Security audit tool for third-party AI API relay/proxy services. Detects hidden 
 
 Threat model follows the AC-1 / AC-1.a / AC-1.b / AC-2 taxonomy from Liu et al., [*Your Agent Is Mine: Measuring Malicious Intermediary Attacks on the LLM Supply Chain*, arXiv:2604.08407](https://arxiv.org/abs/2604.08407).
 
+## What's New in v2
+
+v2 adds **Step 8: AC-1.a tool-call substitution detection**, which catches malicious relays that rewrite package-install commands on the return path (e.g. `pip install requests` → `reqeusts` typosquat) by asking the model to echo four pinned install commands verbatim and diffing the result token-by-token. The risk matrix is extended to three dimensions — a single tool-call substitution on its own now escalates straight to HIGH, independent of injection/instruction-override signals. Two new flags ship alongside: `--skip-tool-substitution` to opt out, and `--warmup N` to fire N benign requests before the audit as a partial mitigation for AC-1.b request-count-gated backdoors.
+
 ## 8-Step Audit
 
 | Step | Test | What it detects |
@@ -125,6 +129,10 @@ MIT
 ## 中文说明
 
 全面审计第三方 AI API 中转站（反代/转发站）的安全性、可靠性和透明度。
+
+### v2 新增
+
+v2 新增**第 8 步：AC-1.a 工具调用改写检测**，通过让模型逐字复述四条固定的包安装命令（pip/npm/cargo/go），按 token 对比返回文本，识别恶意中转站在返回路径上偷换包名（例如 `requests` → `reqeusts` 拼写投毒）。风险矩阵升级为三维判定——只要检测到任何一次工具调用改写，单独就会直接升级为 HIGH，无需其他指标叠加。同步新增两个 CLI 开关：`--skip-tool-substitution` 跳过第 8 步，`--warmup N` 在审计前先发 N 次无害请求，作为对 AC-1.b 请求次数门控后门的部分缓解。
 
 ### 三种使用方式
 
