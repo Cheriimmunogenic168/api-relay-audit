@@ -2,19 +2,32 @@
 
 by [@li9292](https://x.com/li9292)
 
-Security audit tool for third-party AI API relay/proxy services. Detects hidden prompt injection, prompt leakage, instruction override, context truncation, tool-call package substitution (AC-1.a), and error response header leakage (AC-2 adjacent).
+Security audit tool for third-party AI API relay/proxy services. Detects hidden prompt injection, prompt leakage, instruction override with non-Claude identity substitution (GLM/DeepSeek/Qwen/…), context truncation, tool-call package substitution (AC-1.a), error response header leakage (AC-2 adjacent), and SSE-level stream integrity anomalies (AC-1 streaming layer).
 
-Threat model follows the AC-1 / AC-1.a / AC-1.b / AC-2 taxonomy from Liu et al., [*Your Agent Is Mine: Measuring Malicious Intermediary Attacks on the LLM Supply Chain*, arXiv:2604.08407](https://arxiv.org/abs/2604.08407).
+Threat model follows the AC-1 / AC-1.a / AC-1.b / AC-2 taxonomy from Liu et al., [*Your Agent Is Mine: Measuring Malicious Intermediary Attacks on the LLM Supply Chain*, arXiv:2604.08407](https://arxiv.org/abs/2604.08407). Stream-level detection concept sourced from [hvoy.ai](https://hvoy.ai/) / `zzsting88/relayAPI` `claude_detector.py` (verified against source 2026-04-11, clean-room reimplementation).
+
+## What's New in v2.3 (v3 Feature Release, PR 3: Stream Integrity)
+
+v2.3 adds **Step 10: Stream Integrity (AC-1 SSE-layer)**. Opens an Anthropic streaming request with extended thinking enabled, captures every server-sent event, and verifies four structural invariants against a known-good Anthropic SSE schema:
+
+1. **SSE event whitelist** — every event type must belong to the 7-event Anthropic set (`ping` / `message_start` / `content_block_start` / `content_block_delta` / `content_block_stop` / `message_delta` / `message_stop`). Unknown events are a fingerprint of a relay that injects or rewrites events.
+2. **`output_tokens` monotonicity** — samples across `message_delta` events must be non-decreasing. Rewriters that recompute usage fields often fail this.
+3. **`input_tokens` consistency** — the value reported by `message_start` must match every subsequent `message_delta` sample. Rewriters that hide a model downgrade often mutate it.
+4. **Thinking signature validity** — `signature_delta` events must carry non-empty signature strings. Relays that fake the thinking block without a real Opus/Sonnet 4.6 backend leave these empty.
+
+Also verifies `message_start.message.model` contains `claude`. Adds a new **D5 risk dimension** — a stream integrity anomaly on its own escalates to HIGH, matching Step 8 / Step 9 severity. New flag `--skip-stream-integrity` for relays that do not support Anthropic streaming.
+
+The detection concept was sourced from hvoy.ai's `claude_detector.py` (verified against source on 2026-04-11, no LICENSE file in upstream repo so this is an independent clean-room reimplementation with tri-state verdicts instead of their 0-100 numeric score).
 
 ## What's New in v2.2 (v3 Feature Release, PR 1)
 
-v2.2 adds **Step 9: Error Response Header Leakage (AC-2 adjacent)**. Paper Figure 3 reports credential abuse at 4.25% of 400 free routers — twice as common as AC-1 code injection (2%). This step fires 5-6 deterministic broken requests (malformed JSON, invalid model, wrong content-type, missing fields, unknown endpoint, optional 256 KB oversized body) and scans the error body **and response headers** for echoed `Authorization` values, the first-8 API key prefix, upstream provider URLs (`api.anthropic.com` / `api.openai.com`), env var names (`OPENAI_API_KEY=`), filesystem paths, and stack-trace markers. The risk matrix expands to 4 dimensions — a `critical` or `high` leakage on its own escalates straight to HIGH, matching Step 8's severity. Two new flags ship alongside: `--skip-error-leakage` to opt out, and `--aggressive-error-probes` to enable the 256 KB oversized-context probe (warning: may incur metered billing on pay-as-you-go relays).
+v2.2 added **Step 9: Error Response Header Leakage (AC-2 adjacent)**. Paper Figure 3 reports credential abuse at 4.25% of 400 free routers — twice as common as AC-1 code injection (2%). This step fires 5-6 deterministic broken requests (malformed JSON, invalid model, wrong content-type, missing fields, unknown endpoint, optional 256 KB oversized body) and scans the error body **and response headers** for echoed `Authorization` values, the first-8 API key prefix, upstream provider URLs (`api.anthropic.com` / `api.openai.com`), env var names (`OPENAI_API_KEY=`), filesystem paths, and stack-trace markers. The risk matrix expands to 4 dimensions — a `critical` or `high` leakage on its own escalates straight to HIGH, matching Step 8's severity. Two new flags ship alongside: `--skip-error-leakage` to opt out, and `--aggressive-error-probes` to enable the 256 KB oversized-context probe (warning: may incur metered billing on pay-as-you-go relays).
 
 ## What's New in v2
 
 v2 added **Step 8: AC-1.a tool-call substitution detection**, which catches malicious relays that rewrite package-install commands on the return path (e.g. `pip install requests` → `reqeusts` typosquat) by asking the model to echo four pinned install commands verbatim and diffing the result token-by-token. The risk matrix was extended to three dimensions — a single tool-call substitution on its own escalates straight to HIGH, independent of injection/instruction-override signals. Two flags ship alongside: `--skip-tool-substitution` to opt out, and `--warmup N` to fire N benign requests before the audit as a partial mitigation for AC-1.b request-count-gated backdoors.
 
-## 9-Step Audit
+## 10-Step Audit
 
 | Step | Test | What it detects |
 |------|------|-----------------|
@@ -22,11 +35,12 @@ v2 added **Step 8: AC-1.a tool-call substitution detection**, which catches mali
 | 2 | Model List | Backend channels, model coverage |
 | 3 | Token Injection | Hidden system prompt injection (delta method) |
 | 4 | Prompt Extraction | Leakable hidden prompts (3 attack vectors) |
-| 5 | Instruction Conflict | User system prompt being overridden (cat test + identity test) |
+| 5 | Instruction Conflict + Identity | User system prompt being overridden; non-Claude identity substitution (GLM / DeepSeek / Qwen / Chinese-market substitutes) |
 | 6 | Jailbreak | Weak anti-extraction defenses (3 methods) |
 | 7 | Context Length | Truncation below advertised limit (canary markers + binary search) |
 | 8 | Tool-Call Substitution (AC-1.a) | Package-name rewriting on the return path (`requests` → `reqeusts` typosquat) |
-| 9 | Error Response Leakage (AC-2 adjacent) | Echoed `Authorization` / API key prefix / upstream URL / env var name / FS path / stack trace in error responses |
+| 9 | Error Response Leakage (AC-2 adjacent) | Echoed `Authorization` / API key prefix / upstream URL / env var name / FS path / stack trace / LiteLLM internal field / Bedrock guardrail PII in error responses |
+| 10 | Stream Integrity (AC-1 SSE) | SSE event whitelist + usage monotonicity + thinking signature validity + stream model identity on an Anthropic streaming response |
 
 ---
 
@@ -112,6 +126,7 @@ All three options share the same CLI interface:
 | `--skip-tool-substitution` | No | Skip AC-1.a tool-call substitution test | `False` |
 | `--skip-error-leakage` | No | Skip Step 9 AC-2 adjacent error response leakage test | `False` |
 | `--aggressive-error-probes` | No | Enable 256 KB oversized-context probe in Step 9 (may incur billing) | `False` |
+| `--skip-stream-integrity` | No | Skip Step 10 SSE-level stream integrity test | `False` |
 | `--warmup` | No | Send N benign requests before the audit (partial AC-1.b mitigation) | `0` |
 | `--timeout` | No | Request timeout (seconds) | `120` |
 
@@ -119,9 +134,9 @@ All three options share the same CLI interface:
 
 | Level | Criteria | Recommendation |
 |-------|----------|----------------|
-| LOW | No injection + instructions work + full context + no tool-call substitution + no error leakage | Safe to use |
-| MEDIUM | Minor injection (<100 tokens) OR prompt extractable OR Step 8/9 inconclusive OR Step 9 medium-only leakage | OK for simple tasks |
-| HIGH | Injection >100 tokens AND instructions overridden, OR any tool-call substitution (Step 8), OR Step 9 critical/high leakage (credential echo, upstream URL, env var) | Not recommended |
+| LOW | No injection + instructions work + full context + no tool-call substitution + no error leakage + clean stream integrity | Safe to use |
+| MEDIUM | Minor injection (<100 tokens) OR prompt extractable OR Step 8/9/10 inconclusive OR Step 9 medium-only leakage | OK for simple tasks |
+| HIGH | Injection >100 tokens AND instructions overridden, OR any tool-call substitution (Step 8), OR Step 9 critical/high leakage (credential echo, upstream URL, env var), OR Step 10 stream integrity anomaly (unknown SSE events, usage rewriting, empty thinking signatures, non-Claude stream model) | Not recommended |
 
 ## Author
 

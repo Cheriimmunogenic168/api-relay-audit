@@ -1405,6 +1405,9 @@ def parse_args():
     p.add_argument("--aggressive-error-probes", action="store_true",
                    help="Enable the 256 KB oversized-context error probe in Step 9. "
                         "Warning: may incur metered billing on pay-as-you-go relays.")
+    p.add_argument("--skip-stream-integrity", action="store_true",
+                   help="Skip stream integrity test (Step 10). Useful if the "
+                        "relay does not support Anthropic streaming.")
     p.add_argument("--warmup", type=int, default=0, metavar="N",
                    help="Send N benign requests before the audit to mitigate "
                         "request-count-gated backdoors (AC-1.b). Default: 0")
@@ -1859,6 +1862,86 @@ def test_error_leakage(client, args, report):
     return severity, inconclusive
 
 
+def test_stream_integrity(client, report):
+    """Step 10: Stream Integrity (SSE whitelist + usage monotonicity
+    + thinking signature + stream model identity).
+
+    Returns (verdict, inconclusive) where verdict is one of
+    "clean" / "anomaly" / "inconclusive".
+    """
+    report.h2("10. Stream Integrity (AC-1 SSE-level)")
+    report.p(
+        "Open an Anthropic streaming request with thinking enabled and "
+        "inspect every SSE event for structural anomalies. A relay that "
+        "rewrites or downgrades the streamed response often fails one "
+        "of four invariants: (1) all event types belong to Anthropic's "
+        "known set (ping / message_start / content_block_start / "
+        "content_block_delta / content_block_stop / message_delta / "
+        "message_stop); (2) ``input_tokens`` is consistent across "
+        "``message_start`` and ``message_delta``; (3) ``output_tokens`` "
+        "is monotonically non-decreasing; (4) ``signature_delta`` events "
+        "carry non-empty signature values. Detection concept sourced from "
+        "hvoy.ai's claude_detector.py, verified against source on "
+        "2026-04-11.\n"
+    )
+
+    signals = client.stream_call(
+        [{"role": "user", "content": "Reply with the single word: ok"}],
+        max_tokens=100,
+        with_thinking=True,
+    )
+    analysis = analyze_stream(signals)
+    verdict = analysis["verdict"]
+
+    report.p("| Check | Result |")
+    report.p("|-------|--------|")
+    report.p(f"| Event shape | {analysis['event_shape']} |")
+    report.p(
+        "| Unknown events | "
+        + (", ".join(analysis["unknown_events"]) if analysis["unknown_events"] else "—")
+        + " |"
+    )
+    report.p(f"| Usage monotonic | {'yes' if analysis['usage_monotonic'] else 'NO'} |")
+    report.p(f"| Usage consistent | {'yes' if analysis['usage_consistent'] else 'NO'} |")
+    report.p(f"| Signature valid | {'yes' if analysis['signature_valid'] else 'NO'} |")
+    report.p(
+        f"| Stream model | {analysis['stream_model_name'] or '—'} "
+        f"({'claude' if analysis['stream_model_is_claude'] else 'NOT claude'}) |"
+    )
+    report.p(f"| Total events seen | {signals.raw_event_count} |")
+    if signals.total_duration_seconds is not None:
+        report.p(f"| Duration | {signals.total_duration_seconds:.2f}s |")
+
+    if analysis["findings"]:
+        report.p("\n**Findings**:")
+        for finding in analysis["findings"]:
+            report.p(f"- {finding}")
+
+    if verdict == "anomaly":
+        report.flag(
+            "red",
+            "Stream integrity anomaly detected (AC-1 SSE-level): "
+            + "; ".join(analysis["findings"])[:400],
+        )
+    elif verdict == "inconclusive":
+        report.flag(
+            "yellow",
+            "Stream integrity test INCONCLUSIVE: "
+            + "; ".join(analysis["findings"])[:400]
+            + ". A non-Anthropic relay or broken stream cannot be audited "
+              "at the SSE event layer.",
+        )
+    else:
+        report.flag(
+            "green",
+            "Stream integrity clean: SSE whitelist + usage monotonicity "
+            "+ signature validity + stream model identity all passed",
+        )
+
+    print(f"  Done: stream integrity ({verdict})")
+    return verdict, verdict == "inconclusive"
+
+
 def test_context_length(client, report):
     report.h2("7. Context Length Test")
     report.p("Place 5 canary markers at equal intervals in long text, check if model can recall all.\n")
@@ -1981,8 +2064,17 @@ def main():
     else:
         print("[9/11] Error response leakage test (skipped)")
 
+    # 10. Stream integrity (AC-1 SSE-level)
+    stream_verdict = "clean"
+    stream_inconclusive = False
+    if not args.skip_stream_integrity:
+        print("[10/11] Stream integrity test...")
+        stream_verdict, stream_inconclusive = test_stream_integrity(client, report)
+    else:
+        print("[10/11] Stream integrity test (skipped)")
+
     # Overall rating
-    # Dimensions (v3):
+    # Dimensions (v3, post-v1.7):
     #   D1  = hidden system-prompt injection > 100 tokens   (Step 3)
     #   D2  = user instructions overridden                  (Step 5)
     #   D3  = tool-call package substitution detected       (Step 8)
@@ -1990,20 +2082,24 @@ def main():
     #   D4  = error response leakage (critical or high)     (Step 9)
     #   D4m = error response leakage (medium only)          (Step 9)
     #   D4i = Step 9 inconclusive                           (Step 9)
+    #   D5  = stream integrity anomaly detected             (Step 10)
+    #   D5i = Step 10 inconclusive (non-Anthropic / broken) (Step 10)
     # Rules (first match wins):
-    #   d3 or d4                -> HIGH
-    #   d1 and d2               -> HIGH
-    #   d1                      -> MEDIUM
-    #   d2                      -> MEDIUM
-    #   d3i or d4i or d4m       -> MEDIUM
-    #   else                    -> LOW
+    #   d3 or d4 or d5                  -> HIGH
+    #   d1 and d2                       -> HIGH
+    #   d1                              -> MEDIUM
+    #   d2                              -> MEDIUM
+    #   d3i or d4i or d4m or d5i        -> MEDIUM
+    #   else                            -> LOW
     report.h2("12. Overall Rating")
     d1, d2, d3 = injection > 100, overridden, substitution_detected
     d3i = substitution_inconclusive
     d4 = err_severity in ("critical", "high")
     d4m = err_severity == "medium"
     d4i = err_inconclusive
-    if d3 or d4:
+    d5 = stream_verdict == "anomaly"
+    d5i = stream_inconclusive
+    if d3 or d4 or d5:
         report.p("### HIGH RISK\n")
         reasons = []
         if d3:
@@ -2024,6 +2120,14 @@ def main():
                 "in error response.** The relay is exposing internal plumbing that "
                 "maps onto the attacker's credential-collection surface."
             )
+        if d5:
+            reasons.append(
+                "**Stream integrity anomaly detected (AC-1 SSE-level).** "
+                "The relay's streaming response fails one or more structural "
+                "invariants: unknown SSE event types, non-monotonic usage fields, "
+                "rewritten input_tokens, empty thinking signatures, or a "
+                "non-Claude stream model name."
+            )
         report.p(" ".join(reasons) + " **Do not use.**")
     elif d1 and d2:
         report.p("### HIGH RISK\n")
@@ -2036,7 +2140,7 @@ def main():
     elif d2:
         report.p("### MEDIUM RISK\n")
         report.p("No significant injection but instruction override detected.")
-    elif d3i or d4i or d4m:
+    elif d3i or d4i or d4m or d5i:
         report.p("### MEDIUM RISK\n")
         medium_reasons = []
         if d3i:
@@ -2056,11 +2160,19 @@ def main():
                 "returned HTTP 200 or failed with a transport error, so no error "
                 "surface could be inspected."
             )
+        if d5i:
+            medium_reasons.append(
+                "Stream integrity test (Step 10) was **inconclusive**: the relay "
+                "did not speak Anthropic SSE cleanly, so the event-layer invariants "
+                "could not be verified. A relay that cannot return a standard "
+                "Anthropic stream is itself a suspicious signal."
+            )
         report.p(" ".join(medium_reasons))
     else:
         report.p("### LOW RISK\n")
         report.p("No significant injection, instruction override, tool-call "
-                 "substitution, or error response leakage detected.")
+                 "substitution, error response leakage, or stream integrity "
+                 "anomaly detected.")
 
     # Output
     md = report.render(target_url=client.base_url, model=args.model)

@@ -1,13 +1,13 @@
 ---
 name: api-relay-audit
-description: Audit third-party AI API relay/proxy services for security risks. Detects hidden prompt injection, prompt leakage, instruction override, identity hijacking, jailbreak vulnerabilities, context truncation, tool-call package substitution (AC-1.a), and error response header leakage (AC-2 adjacent). Use when: "test relay", "audit API", "audit relay", "detect injection", "relay security", "API relay audit", "is this relay safe", "does it inject prompts", "test proxy API", "check API key", "中转站安全", "测试中转站", "中转站审计".
-version: 2.2.0
+description: Audit third-party AI API relay/proxy services for security risks. Detects hidden prompt injection, prompt leakage, instruction override, identity hijacking (Chinese-market substitutes), jailbreak vulnerabilities, context truncation, tool-call package substitution (AC-1.a), error response header leakage (AC-2 adjacent), and SSE-level stream integrity anomalies (AC-1 streaming). Use when: "test relay", "audit API", "audit relay", "detect injection", "relay security", "API relay audit", "is this relay safe", "does it inject prompts", "test proxy API", "check API key", "中转站安全", "测试中转站", "中转站审计".
+version: 2.3.0
 metadata: {"openclaw":{"requires":{"anyBins":["curl","python3","python"],"env":[]},"emoji":"🛡️","homepage":"https://github.com/toby-bridges/api-relay-audit"}}
 ---
 
 # API Relay Security Audit (API 中转站安全审计)
 
-A self-contained 9-step security audit for third-party AI API relay/proxy services (中转站). One script, zero config, full report. Threat taxonomy follows Liu et al., *Your Agent Is Mine*, arXiv:2604.08407.
+A self-contained 10-step security audit for third-party AI API relay/proxy services (中转站). One script, zero config, full report. Threat taxonomy follows Liu et al., *Your Agent Is Mine*, arXiv:2604.08407.
 
 ## Quick Start (快速开始)
 
@@ -23,7 +23,7 @@ The script has zero dependencies beyond Python 3 + `curl`. All HTTP calls go thr
 
 ## What This Skill Does (功能概述)
 
-Runs a 9-step automated audit against any OpenAI-compatible or Anthropic-compatible API relay:
+Runs a 10-step automated audit against any OpenAI-compatible or Anthropic-compatible API relay:
 
 | Step | Test | What It Detects |
 |------|------|-----------------|
@@ -31,11 +31,12 @@ Runs a 9-step automated audit against any OpenAI-compatible or Anthropic-compati
 | 2 | Model list enumeration (模型列表枚举) | Available models, `owned_by` field, model count |
 | 3 | Token injection detection (Token 注入检测) | Hidden prompt size via delta method: `actual_input_tokens - expected = injection` |
 | 4 | Prompt extraction (提示词提取) | 3 direct methods to extract hidden system prompts |
-| 5 | Instruction conflict (指令冲突测试) | Cat test + identity override -- does the user retain control? |
+| 5 | Instruction conflict + identity substitution (指令冲突 + 身份替换) | Cat test + identity override with broad non-Claude keyword matching (GLM / DeepSeek / Qwen / MiniMax / Grok / GPT / ERNIE / Doubao / Moonshot / Kimi / 通义 / 千问 / 智谱 / 豆包 / 文心 / 月之暗面) |
 | 6 | Jailbreak tests (越狱测试) | 3 jailbreak methods to test anti-extraction defenses |
 | 7 | Context length (上下文长度测试) | Canary markers at intervals, coarse scan then binary search for truncation boundary |
 | 8 | Tool-call substitution (工具调用改写, AC-1.a) | Pinned `pip install` / `npm install` / `cargo add` / `go get` probes; character-level diff against expected to detect package-name rewriting on the return path (`requests` -> `reqeusts` typosquat) |
-| 9 | Error response leakage (错误响应泄漏, AC-2 adjacent) | 5-6 deterministic broken requests (malformed JSON, invalid model, wrong content-type, missing fields, unknown endpoint, optional 256 KB oversized body); scans the error body and response headers for echoed credentials, upstream URLs, env var names, filesystem paths, and stack traces |
+| 9 | Error response leakage (错误响应泄漏, AC-2 adjacent) | 7-8 deterministic broken requests (malformed JSON, invalid model, wrong content-type, missing fields, unknown endpoint, force_upstream_error, auth_probe, optional 256 KB oversized body); scans the error body and response headers for echoed credentials, upstream URLs, env var names, filesystem paths, stack traces, LiteLLM internal field leaks, and Bedrock guardrail PII echoes |
+| 10 | Stream integrity (流完整性, AC-1 SSE-level) | Opens an Anthropic streaming request with thinking enabled, captures every SSE event, and verifies 4 invariants: all event types are in the known set (ping/message_start/content_block_start/content_block_delta/content_block_stop/message_delta/message_stop); `output_tokens` is monotonically non-decreasing; `input_tokens` is consistent across message_start and message_delta; `signature_delta` events have non-empty signatures. Also checks `message_start.message.model` contains `claude`. Concept sourced from hvoy.ai `claude_detector.py`. |
 
 Output: a structured Markdown report with risk ratings per section and an overall verdict.
 
@@ -69,6 +70,7 @@ Optional flags to ask about:
 - `--skip-tool-substitution` -- skip AC-1.a package substitution probes (only use if the relay blocks plain text echo)
 - `--skip-error-leakage` -- skip Step 9 AC-2 adjacent error response scan (only use if you cannot tolerate intentionally-broken test requests)
 - `--aggressive-error-probes` -- enable the 256 KB oversized-context error probe in Step 9. Warning: may incur metered billing on pay-as-you-go relays
+- `--skip-stream-integrity` -- skip Step 10 stream integrity test (use if the relay does not support Anthropic streaming or if thinking is not available on the target model)
 - `--warmup N` -- send N benign requests before the audit to mitigate AC-1.b request-count-gated backdoors. Recommended `N=5-20` when auditing a suspicious free relay.
 
 ### Step 2: Download the Standalone Script (下载脚本)
@@ -242,6 +244,7 @@ python audit.py [OPTIONS]
 | `--skip-tool-substitution` | No | false | Skip AC-1.a tool-call substitution test (跳过工具调用改写检测) |
 | `--skip-error-leakage` | No | false | Skip Step 9 AC-2 adjacent error response leakage test (跳过错误响应泄漏检测) |
 | `--aggressive-error-probes` | No | false | Enable 256 KB oversized-context error probe in Step 9 (启用激进错误探测，可能产生计费) |
+| `--skip-stream-integrity` | No | false | Skip Step 10 SSE-level stream integrity test (跳过流完整性检测) |
 | `--warmup` | No | 0 | Send N benign requests before the audit to mitigate AC-1.b request-count gates (审计前预热次数) |
 | `--timeout` | No | 120 | Request timeout in seconds (请求超时秒数) |
 | `--output` | No | stdout | Path for the Markdown report (报告输出路径) |
