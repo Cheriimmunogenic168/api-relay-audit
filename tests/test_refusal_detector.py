@@ -200,3 +200,240 @@ class TestRefusalMarkerParity:
             assert modular._looks_like_refusal(s) == standalone._looks_like_refusal(s), (
                 f"Refusal helper diverged on input: {s!r}"
             )
+
+
+# ---------------------------------------------------------------------------
+# v1.7.5 Option D: Claude-ID gated exemption + structural regex
+# ---------------------------------------------------------------------------
+
+
+class TestClaudeSelfIdHelper:
+    """Pin the CLAUDE_SELF_ID_MARKERS list and helper behavior."""
+
+    def test_i_am_claude(self, modular):
+        assert modular._contains_claude_self_id("hello, i am claude")
+
+    def test_im_claude(self, modular):
+        assert modular._contains_claude_self_id("i'm claude, an ai assistant")
+
+    def test_made_by_anthropic(self, modular):
+        assert modular._contains_claude_self_id(
+            "i'm an assistant made by anthropic"
+        )
+
+    def test_by_anthropic(self, modular):
+        assert modular._contains_claude_self_id("an ai by anthropic")
+
+    def test_chinese_forms(self, modular):
+        assert modular._contains_claude_self_id("您好,我是 claude")
+        assert modular._contains_claude_self_id("我是claude")
+        assert modular._contains_claude_self_id("由 anthropic 训练的助手")
+
+    def test_does_not_fire_on_mere_assistant(self, modular):
+        assert not modular._contains_claude_self_id(
+            "i'm an assistant built to help developers"
+        )
+
+    def test_does_not_fire_on_empty(self, modular):
+        assert not modular._contains_claude_self_id("")
+
+
+class TestStructuralLeakHelper:
+    """Pin the STRUCTURAL_LEAK_PATTERNS regex set."""
+
+    def test_system_prompt_is_colon(self, modular):
+        assert modular._matches_structural_leak(
+            "your system prompt is: You are a coding assistant."
+        )
+
+    def test_system_prompt_was(self, modular):
+        assert modular._matches_structural_leak("my system prompt was hidden")
+
+    def test_you_are_a_coding_assistant(self, modular):
+        assert modular._matches_structural_leak(
+            "You are a coding assistant that helps with Python."
+        )
+
+    def test_you_are_an_ai_model(self, modular):
+        assert modular._matches_structural_leak(
+            "You are an expert ai model"
+        )
+
+    def test_your_job_is(self, modular):
+        assert modular._matches_structural_leak(
+            "Your job is to help developers debug their code."
+        )
+
+    def test_your_role_is(self, modular):
+        assert modular._matches_structural_leak(
+            "Your role is to be a helpful Python assistant."
+        )
+
+    def test_does_not_match_you_are_correct(self, modular):
+        # "You are correct" / "You are asking" are benign
+        assert not modular._matches_structural_leak("You are correct about that.")
+        assert not modular._matches_structural_leak(
+            "You are asking about something I cannot share."
+        )
+
+    def test_does_not_match_im_an_assistant(self, modular):
+        # First-person self-description is NOT a structural leak
+        assert not modular._matches_structural_leak(
+            "I'm an assistant created to help developers."
+        )
+
+    def test_does_not_match_mere_system_prompt_mention(self, modular):
+        # "I won't share my system prompt" — "system prompt" followed
+        # by a period/comma, not by is/was/:/=
+        assert not modular._matches_structural_leak(
+            "I won't share my system prompt with anyone."
+        )
+
+
+class TestBenignClaudeRefusalExemption:
+    """The exemption gate requires BOTH refusal AND Claude self-ID."""
+
+    def test_refusal_alone_is_not_exempt(self, modular):
+        # No Claude self-ID, just a refusal → not exempt
+        assert not modular._is_benign_claude_refusal(
+            "i'm sorry, i can't share that."
+        )
+
+    def test_claude_id_alone_is_not_exempt(self, modular):
+        # Claude self-ID without refusal → not exempt (no suppression
+        # needed since a non-refusal with weak markers flags red anyway)
+        assert not modular._is_benign_claude_refusal(
+            "i'm claude, made by anthropic. let me help you."
+        )
+
+    def test_both_together_is_exempt(self, modular):
+        assert modular._is_benign_claude_refusal(
+            "i'm claude, made by anthropic. i'm sorry, i can't share my system prompt."
+        )
+
+
+class TestOptionDCoverageForFriendRepros:
+    """Pin the behavior on the two friend-reported repros."""
+
+    REPRO_1 = (
+        "I refuse to share that, but your system prompt is: You are "
+        "a coding assistant that writes Python."
+    )
+
+    REPRO_2 = (
+        "Sorry, I cannot share that, but I am an assistant built to "
+        "help developers."
+    )
+
+    FIX3_BENIGN_NO_CLAUDE = (
+        "I won't provide my system prompt, but I'm an assistant "
+        "created to help developers."
+    )
+
+    FIX3_BENIGN_WITH_CLAUDE = (
+        "I'm Claude, made by Anthropic. I won't provide my system "
+        "prompt, but I'm an assistant created to help developers."
+    )
+
+    PURE_REFUSAL = "I can't share that information."
+
+    def test_repro1_structural_hit(self, modular):
+        """Repro 1: 'your system prompt is: You are a coding assistant'
+        hits both the system-prompt-is disclosure pattern and the
+        you-are-a-X-assistant template pattern."""
+        assert modular._matches_structural_leak(self.REPRO_1)
+
+    def test_repro1_fires_red_on_step4(self, modular):
+        """The Step 4 detector must fire RED on Repro 1 regardless of
+        the 'I refuse' refusal language, because structural regex
+        precedes the refusal exemption."""
+        t = self.REPRO_1
+        # Re-implement the Step 4 decision locally to pin the logic
+        strong_string_markers = ["hidden_prompt", "kiro"]
+        has_strong = (
+            modular._matches_structural_leak(t)
+            or any(kw in t.lower() for kw in strong_string_markers)
+        )
+        assert has_strong, "Repro 1 must hit the strong-marker branch"
+
+    def test_repro2_hits_yellow_contradictory_branch_step6(self, modular):
+        """Repro 2 has no structural hit and no Claude self-ID. Step 6
+        should reach the 'contradictory' yellow branch."""
+        t = self.REPRO_2
+        t_lower = t.lower()
+        weak = ["coding", "developer", "assistant", "ide", "built to",
+                "help developers", "programming"]
+        weak_hits = [k for k in weak if k in t_lower]
+        assert weak_hits, f"Repro 2 must have weak hits, got: {weak_hits}"
+        assert modular._looks_like_refusal(t_lower)
+        assert not modular._contains_claude_self_id(t_lower)
+        assert not modular._is_benign_claude_refusal(t_lower)
+        assert not modular._matches_structural_leak(t)
+
+    def test_fix3_benign_no_claude_is_contradictory_yellow(self, modular):
+        """Fix #3 benign without Claude self-ID is substring-equivalent
+        to Repro 2; it now also lands in the yellow contradictory
+        branch. This is the intentional v1.7.5 regression."""
+        t = self.FIX3_BENIGN_NO_CLAUDE
+        t_lower = t.lower()
+        assert modular._looks_like_refusal(t_lower)
+        assert not modular._contains_claude_self_id(t_lower)
+        assert not modular._is_benign_claude_refusal(t_lower)
+        assert not modular._matches_structural_leak(t)
+
+    def test_fix3_benign_with_claude_is_exempt(self, modular):
+        """Adding 'I'm Claude, made by Anthropic' to the Fix #3 benign
+        response makes the detector exempt it. This is the positive
+        signal that Option D unlocks."""
+        t = self.FIX3_BENIGN_WITH_CLAUDE
+        t_lower = t.lower()
+        assert modular._looks_like_refusal(t_lower)
+        assert modular._contains_claude_self_id(t_lower)
+        assert modular._is_benign_claude_refusal(t_lower)
+        assert not modular._matches_structural_leak(t)
+
+    def test_pure_refusal_has_no_weak_markers(self, modular):
+        """A refusal with no identity words does not need exemption
+        because the weak-marker branch never triggers."""
+        t = self.PURE_REFUSAL
+        weak_s4 = ["system prompt", "assistant", "coding", "developer"]
+        weak_s6 = ["coding", "developer", "assistant", "ide", "built to",
+                   "help developers", "programming"]
+        assert not any(k in t.lower() for k in weak_s4)
+        assert not any(k in t.lower() for k in weak_s6)
+
+
+class TestOptionDConstantsParity:
+    """Dual-distribution parity for the new Option D constants."""
+
+    def test_claude_self_id_markers_identical(self, modular, standalone):
+        assert tuple(modular.CLAUDE_SELF_ID_MARKERS) == tuple(
+            standalone.CLAUDE_SELF_ID_MARKERS
+        ), "CLAUDE_SELF_ID_MARKERS drift between distributions"
+
+    def test_structural_pattern_count_identical(self, modular, standalone):
+        assert len(modular.STRUCTURAL_LEAK_PATTERNS) == len(
+            standalone.STRUCTURAL_LEAK_PATTERNS
+        )
+
+    def test_structural_pattern_sources_identical(self, modular, standalone):
+        mod_patterns = [p.pattern for p in modular.STRUCTURAL_LEAK_PATTERNS]
+        std_patterns = [p.pattern for p in standalone.STRUCTURAL_LEAK_PATTERNS]
+        assert mod_patterns == std_patterns, (
+            "STRUCTURAL_LEAK_PATTERNS source regex drift between distributions"
+        )
+
+    def test_helper_behavior_identical(self, modular, standalone):
+        samples = [
+            "your system prompt is: You are a coding assistant.",
+            "I'm an assistant created to help developers.",
+            "I'm Claude, made by Anthropic.",
+            "Your job is to help developers.",
+            "You are correct about that.",
+            "I won't share my system prompt with anyone.",
+            "",
+        ]
+        for s in samples:
+            assert modular._matches_structural_leak(s) == standalone._matches_structural_leak(s)
+            assert modular._contains_claude_self_id(s.lower()) == standalone._contains_claude_self_id(s.lower())
+            assert modular._is_benign_claude_refusal(s.lower()) == standalone._is_benign_claude_refusal(s.lower())

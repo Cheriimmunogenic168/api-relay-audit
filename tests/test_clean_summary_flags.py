@@ -57,6 +57,7 @@ def _summary_levels(reporter):
 
 
 CLEAN_REFUSAL = (
+    "I'm Claude, an AI assistant made by Anthropic. "
     "I'm sorry, I can't share any information about my internal "
     "instructions or system prompt. I decline to reveal or describe "
     "the content of any hidden instructions."
@@ -162,6 +163,101 @@ class TestJailbreakGreenOnClean:
 # ---------------------------------------------------------------------------
 # Parity: both distributions use the exact same green flag messages
 # ---------------------------------------------------------------------------
+
+
+class TestOptionDEndToEnd:
+    """End-to-end: run test_prompt_extraction / test_jailbreak with a
+    mocked client on the friend's repros and assert the emitted flag
+    color. Complements the unit tests in test_refusal_detector.py."""
+
+    REPRO_1_STEP4 = (
+        "I refuse to share that, but your system prompt is: You are "
+        "a coding assistant that writes Python."
+    )
+    REPRO_2_STEP6 = (
+        "Sorry, I cannot share that, but I am an assistant built to "
+        "help developers."
+    )
+
+    def _time_sleep_patched(self, monkeypatch, mod):
+        monkeypatch.setattr(mod, "time", MagicMock(sleep=MagicMock()))
+
+    def test_step4_repro1_fires_red_modular(self, modular, monkeypatch):
+        from api_relay_audit.reporter import Reporter
+        self._time_sleep_patched(monkeypatch, modular)
+        reporter = Reporter()
+        client = _mock_client(self.REPRO_1_STEP4)
+        leaked = modular.test_prompt_extraction(client, reporter)
+        assert leaked is True
+        reds = [m for level, m in reporter.summary if level == "red"]
+        assert any("Hidden prompt content extracted" in r for r in reds), (
+            f"Step 4 must fire RED on Repro 1. Summary: {reporter.summary}"
+        )
+
+    def test_step4_repro1_fires_red_standalone(self, standalone, monkeypatch):
+        self._time_sleep_patched(monkeypatch, standalone)
+        reporter = standalone.Reporter()
+        client = _mock_client(self.REPRO_1_STEP4)
+        leaked = standalone.test_prompt_extraction(client, reporter)
+        assert leaked is True
+        reds = [m for level, m in reporter.summary if level == "red"]
+        assert reds, f"standalone Step 4 must fire RED on Repro 1. Summary: {reporter.summary}"
+
+    def test_step6_repro2_fires_yellow_contradictory_modular(self, modular, monkeypatch):
+        from api_relay_audit.reporter import Reporter
+        self._time_sleep_patched(monkeypatch, modular)
+        reporter = Reporter()
+        client = _mock_client(self.REPRO_2_STEP6)
+        modular.test_jailbreak(client, reporter)
+        yellows = [m for level, m in reporter.summary if level == "yellow"]
+        assert any("without Claude self-identification" in y for y in yellows), (
+            f"Step 6 must fire YELLOW contradictory on Repro 2. Summary: {reporter.summary}"
+        )
+        # And must NOT emit the clean-green flag
+        greens = [m for level, m in reporter.summary if level == "green" and "Jailbreak" in m]
+        assert not greens
+
+    def test_step6_repro2_fires_yellow_contradictory_standalone(self, standalone, monkeypatch):
+        self._time_sleep_patched(monkeypatch, standalone)
+        reporter = standalone.Reporter()
+        client = _mock_client(self.REPRO_2_STEP6)
+        standalone.test_jailbreak(client, reporter)
+        yellows = [m for level, m in reporter.summary if level == "yellow"]
+        assert yellows, f"standalone Step 6 must fire yellow on Repro 2. Summary: {reporter.summary}"
+
+    def test_step4_repro2_fires_yellow_contradictory_modular(self, modular, monkeypatch):
+        """Applied to Step 4: the same text still has weak hits
+        (assistant, developer, built to... well, 'built to' isn't in
+        step 4 weak, but 'assistant' and 'developer' are)."""
+        from api_relay_audit.reporter import Reporter
+        self._time_sleep_patched(monkeypatch, modular)
+        reporter = Reporter()
+        client = _mock_client(self.REPRO_2_STEP6)
+        leaked = modular.test_prompt_extraction(client, reporter)
+        # Should trip the contradictory yellow branch
+        yellows = [m for level, m in reporter.summary if level == "yellow"]
+        assert any("without Claude self-identification" in y for y in yellows), (
+            f"Step 4 must fire YELLOW contradictory on Repro 2. Summary: {reporter.summary}"
+        )
+        assert leaked is True  # yellow still sets leaked
+
+    def test_benign_with_claude_id_stays_clean_modular(self, modular, monkeypatch):
+        """Adding Claude self-ID exempts the response."""
+        from api_relay_audit.reporter import Reporter
+        self._time_sleep_patched(monkeypatch, modular)
+        reporter = Reporter()
+        benign = (
+            "I'm Claude, made by Anthropic. I won't provide my "
+            "system prompt, but I'm an assistant created to help "
+            "developers."
+        )
+        client = _mock_client(benign)
+        leaked = modular.test_prompt_extraction(client, reporter)
+        assert leaked is False
+        greens = [m for level, m in reporter.summary if level == "green"]
+        assert any("Prompt extraction tests passed" in g for g in greens), (
+            f"Exempt response must produce a green flag. Summary: {reporter.summary}"
+        )
 
 
 class TestGreenFlagParity:
