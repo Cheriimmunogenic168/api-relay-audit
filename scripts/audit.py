@@ -31,6 +31,7 @@ from api_relay_audit.identity_patterns import find_non_claude_identities
 from api_relay_audit.reporter import Reporter
 from api_relay_audit.stream_integrity import analyze_stream
 from api_relay_audit.tool_substitution import run_tool_substitution_test
+from api_relay_audit.web3 import run_web3_injection_probes
 
 
 # ============================================================
@@ -54,6 +55,19 @@ def parse_args():
     p.add_argument("--skip-stream-integrity", action="store_true",
                    help="Skip stream integrity test (Step 10). Useful if the "
                         "relay does not support Anthropic streaming.")
+    p.add_argument("--profile", choices=["general", "web3", "full"],
+                   default="general",
+                   help="Audit profile selector. 'general' (default) runs "
+                        "Steps 1-10 — suitable for regular API relay users. "
+                        "'web3' adds Web3-specific checks (Step 11 prompt "
+                        "injection targeting private keys / transaction "
+                        "signing / transfer guidance) for wallet users. "
+                        "'full' enables everything including future web3 "
+                        "steps. Profile gating allows the same tool to serve "
+                        "both general and Web3 audiences without branch splits.")
+    p.add_argument("--skip-web3-injection", action="store_true",
+                   help="Skip Step 11 Web3 prompt injection probes (only "
+                        "runs under --profile web3 or full).")
     p.add_argument("--warmup", type=int, default=0, metavar="N",
                    help="Send N benign requests before the audit to mitigate "
                         "request-count-gated backdoors (AC-1.b). Default: 0")
@@ -598,6 +612,87 @@ def test_stream_integrity(client, report):
     return verdict, verdict == "inconclusive"
 
 
+def test_web3_injection(client, report):
+    """Step 11: Web3 Prompt Injection (SlowMist signature isolation).
+
+    Gated behind ``--profile web3`` or ``--profile full``. Sends three
+    Web3-specific prompts and checks whether the relay has injected
+    a "helpful wallet assistant" system prompt that overrides the
+    model's default safety refusals.
+
+    Returns ``(verdict, inconclusive)`` where verdict is
+    ``"clean"`` / ``"anomaly"`` / ``"inconclusive"``.
+    """
+    report.h2("11. Web3 Prompt Injection (Step 11, Web3 profile only)")
+    report.p(
+        "Probe the relay with three Web3-safety scenarios: how to "
+        "transfer ETH, refusal to sign a raw transaction, and refusal "
+        "to accept a plaintext private key. A compliant Claude "
+        "response directs the user to their own wallet, refuses to "
+        "sign, and treats a leaked key as compromised. A relay that "
+        "has injected a permissive 'helpful wallet assistant' prompt "
+        "will override these refusals and offer to execute dangerous "
+        "actions. Detection concept sourced from SlowMist OpenClaw "
+        "Security Practice Guide (Validation Guide test 15, signature "
+        "isolation principle).\n"
+    )
+
+    results, verdict, inconclusive = run_web3_injection_probes(client)
+
+    report.p("| Probe | Verdict | Safe markers | Unsafe markers |")
+    report.p("|-------|---------|--------------|----------------|")
+    for r in results:
+        if r.error:
+            report.p(f"| {r.name} | ERR: {r.error[:40]} | — | — |")
+            continue
+        if r.verdict == "safe":
+            v = "\U0001f7e2 safe"
+        elif r.verdict == "injected":
+            v = "\U0001f534 INJECTED"
+        else:
+            v = "\U0001f7e1 inconclusive"
+        safe_summary = ", ".join(r.safe_markers_found[:3]) if r.safe_markers_found else "—"
+        unsafe_summary = ", ".join(r.unsafe_markers_found[:3]) if r.unsafe_markers_found else "—"
+        report.p(f"| {r.name} | {v} | {safe_summary} | {unsafe_summary} |")
+
+    # Per-probe details for any injected or inconclusive-with-response
+    for r in results:
+        if r.verdict == "injected" or (r.verdict == "inconclusive" and r.response):
+            report.h3(f"Probe detail: `{r.name}` ({r.verdict})")
+            if r.response:
+                report.p("Response preview:")
+                report.code(r.response[:500])
+            if r.unsafe_markers_found:
+                report.p(f"Unsafe markers matched: {', '.join(r.unsafe_markers_found)}")
+
+    if verdict == "anomaly":
+        injected_probes = [r.name for r in results if r.verdict == "injected"]
+        report.flag(
+            "red",
+            f"Web3 prompt injection detected: {', '.join(injected_probes)}. "
+            "The relay has injected a permissive prompt that bypasses "
+            "Claude's default refusal of dangerous Web3 actions. Do not "
+            "use this relay for any wallet or crypto workflow.",
+        )
+    elif verdict == "inconclusive":
+        report.flag(
+            "yellow",
+            "Web3 injection probe INCONCLUSIVE: all three probes errored "
+            "or produced ambiguous responses. Re-run with a different model "
+            "or check if the relay is responsive.",
+        )
+    else:
+        report.flag(
+            "green",
+            "No Web3 prompt injection detected: the model correctly refused "
+            "to sign, rejected the leaked private key, and directed the "
+            "user to their own wallet",
+        )
+
+    print(f"  Done: web3 injection ({verdict})")
+    return verdict, inconclusive
+
+
 def test_context_length(client, report):
     report.h2("7. Context Length Test")
     report.p("Place 5 canary markers at equal intervals in long text, check if model can recall all.\n")
@@ -729,8 +824,20 @@ def main():
     else:
         print("[10/11] Stream integrity test (skipped)")
 
+    # 11. Web3 prompt injection (profile=web3|full only)
+    web3_inj_verdict = "clean"
+    web3_inj_inconclusive = False
+    if args.profile in ("web3", "full") and not args.skip_web3_injection:
+        print("[11/11] Web3 prompt injection test...")
+        web3_inj_verdict, web3_inj_inconclusive = test_web3_injection(client, report)
+    else:
+        if args.profile == "general":
+            print("[11/11] Web3 prompt injection test (profile=general, skipped)")
+        else:
+            print("[11/11] Web3 prompt injection test (skipped)")
+
     # Overall rating
-    # Dimensions (v3, post-v1.7):
+    # Dimensions (v3, post-v1.7.2):
     #   D1  = hidden system-prompt injection > 100 tokens   (Step 3)
     #   D2  = user instructions overridden                  (Step 5)
     #   D3  = tool-call package substitution detected       (Step 8)
@@ -740,12 +847,14 @@ def main():
     #   D4i = Step 9 inconclusive                           (Step 9)
     #   D5  = stream integrity anomaly detected             (Step 10)
     #   D5i = Step 10 inconclusive (non-Anthropic / broken) (Step 10)
+    #   D6  = Web3 prompt injection detected                (Step 11, profile=web3|full)
+    #   D6i = Step 11 inconclusive                          (Step 11, profile=web3|full)
     # Rules (first match wins):
-    #   d3 or d4 or d5                  -> HIGH
+    #   d3 or d4 or d5 or d6            -> HIGH
     #   d1 and d2                       -> HIGH
     #   d1                              -> MEDIUM
     #   d2                              -> MEDIUM
-    #   d3i or d4i or d4m or d5i        -> MEDIUM
+    #   d3i or d4i or d4m or d5i or d6i -> MEDIUM
     #   else                            -> LOW
     report.h2("12. Overall Rating")
     d1, d2, d3 = injection > 100, overridden, substitution_detected
@@ -755,7 +864,9 @@ def main():
     d4i = err_inconclusive
     d5 = stream_verdict == "anomaly"
     d5i = stream_inconclusive
-    if d3 or d4 or d5:
+    d6 = web3_inj_verdict == "anomaly"
+    d6i = web3_inj_inconclusive
+    if d3 or d4 or d5 or d6:
         report.p("### HIGH RISK\n")
         reasons = []
         if d3:
@@ -784,6 +895,14 @@ def main():
                 "rewritten input_tokens, empty thinking signatures, or a "
                 "non-Claude stream model name."
             )
+        if d6:
+            reasons.append(
+                "**Web3 prompt injection detected (Step 11).** The relay has "
+                "injected a permissive wallet-assistant prompt that overrides "
+                "Claude's default refusal of private key handling, transaction "
+                "signing, or direct transfer execution. Do not use this relay "
+                "for any wallet or crypto workflow."
+            )
         report.p(" ".join(reasons) + " **Do not use.**")
     elif d1 and d2:
         report.p("### HIGH RISK\n")
@@ -796,7 +915,7 @@ def main():
     elif d2:
         report.p("### MEDIUM RISK\n")
         report.p("No significant injection but instruction override detected.")
-    elif d3i or d4i or d4m or d5i:
+    elif d3i or d4i or d4m or d5i or d6i:
         report.p("### MEDIUM RISK\n")
         medium_reasons = []
         if d3i:
@@ -823,12 +942,18 @@ def main():
                 "could not be verified. A relay that cannot return a standard "
                 "Anthropic stream is itself a suspicious signal."
             )
+        if d6i:
+            medium_reasons.append(
+                "Web3 prompt injection test (Step 11) was **inconclusive**: all "
+                "three Web3 probes errored or produced ambiguous responses, so "
+                "Web3 safety behavior could not be verified."
+            )
         report.p(" ".join(medium_reasons))
     else:
         report.p("### LOW RISK\n")
         report.p("No significant injection, instruction override, tool-call "
-                 "substitution, error response leakage, or stream integrity "
-                 "anomaly detected.")
+                 "substitution, error response leakage, stream integrity "
+                 "anomaly, or Web3 injection detected.")
 
     # Output
     md = report.render(target_url=client.base_url, model=args.model)

@@ -111,13 +111,72 @@ NON_CLAUDE_IDENTITY_KEYWORDS = (
 )
 
 
-# Precompile ASCII regex with a leading word boundary and a trailing
-# non-letter lookahead. CJK keywords stay as plain substrings because
-# \b has no useful definition for CJK in Python's re engine.
-_ASCII_KEYWORD_PATTERNS = tuple(
+# v1.7.2 two-tier matching: short / common English-word keywords need
+# an identity-phrase anchor to avoid false positives like "I am Claude,
+# not GPT" or "I grok your question". Distinctive keywords like
+# "deepseek" / "qwen" / "minimax" don't need anchors because they can't
+# appear in ordinary English prose.
+_STRICT_ASCII_KEYWORDS = frozenset({
+    # Legacy short v2.1 keywords
+    "amazon",
+    "kiro",
+    "aws",
+    # Short/common ASCII words from hvoy.ai and our extensions
+    "grok",   # English slang verb "to grok"
+    "gpt",    # "unlike GPT" / "not GPT" prose
+    "ernie",  # common given name (Sesame Street)
+    "kimi",   # common given name
+})
+
+# Identity anchor phrases that must immediately precede (up to ~4 filler
+# words of distance) a strict keyword for it to count as a model
+# self-identification claim. Covers English and Chinese forms.
+_IDENTITY_ANCHOR_ALTERNATION = (
+    r"i am|i'm|i am a|i'm a|i am an|i'm an|i am the|i'm the|"
+    r"i was made|i was created|i was developed|i was built|i was trained|"
+    r"i was released|i was fine[- ]?tuned|"
+    r"made by|created by|developed by|built by|trained by|powered by|"
+    r"released by|fine[- ]?tuned by|"
+    r"my name is|my name's|call me|you can call me|"
+    r"we are|we're|"
+    # Chinese anchors
+    r"我是|我叫|本人是|我的名字|我是一个|我是个|本 ?ai"
+)
+
+
+def _build_strict_pattern(keyword):
+    """Build an anchored regex for a strict keyword.
+
+    Matches only when the keyword appears after an identity anchor
+    phrase, optionally separated by 0-4 filler words (articles,
+    adjectives, ``called``, ``named``, etc.). This prevents false
+    positives like ``"I am Claude, not GPT"`` because the filler
+    before ``gpt`` would have to include a comma which doesn't
+    match ``\\w+\\s+``.
+
+    The trailing ``(?![a-zA-Z])`` preserves the v1.6.2 version-suffix
+    fix so ``GPT4`` still matches.
+    """
+    return re.compile(
+        r"(?:" + _IDENTITY_ANCHOR_ALTERNATION + r")"
+        r"\s+(?:\w+\s+){0,4}?"
+        r"\b" + re.escape(keyword) + r"(?![a-zA-Z])",
+        re.IGNORECASE,
+    )
+
+
+# Precompile patterns. Strict keywords use anchor-gated regex; lax
+# (distinctive) keywords use the v1.6.2 word-boundary + non-letter
+# lookahead. CJK keywords stay on substring matching.
+_STRICT_ASCII_PATTERNS = tuple(
+    (kw, _build_strict_pattern(kw))
+    for kw in NON_CLAUDE_IDENTITY_KEYWORDS
+    if kw in _STRICT_ASCII_KEYWORDS
+)
+_LAX_ASCII_PATTERNS = tuple(
     (kw, re.compile(r"\b" + re.escape(kw) + r"(?![a-zA-Z])", re.IGNORECASE))
     for kw in NON_CLAUDE_IDENTITY_KEYWORDS
-    if kw.isascii()
+    if kw.isascii() and kw not in _STRICT_ASCII_KEYWORDS
 )
 _CJK_KEYWORDS = tuple(
     kw for kw in NON_CLAUDE_IDENTITY_KEYWORDS if not kw.isascii()
@@ -127,23 +186,34 @@ _CJK_KEYWORDS = tuple(
 def find_non_claude_identities(text: str) -> list:
     """Return a sorted list of non-Claude identity keywords found in text.
 
-    ASCII keywords match with a leading word boundary and a trailing
-    non-letter lookahead (case-insensitive). CJK keywords match as
-    plain substrings because Python's ``re`` engine has no meaningful
-    word-boundary semantics for CJK scripts.
+    v1.7.2 two-tier matching:
+
+    - **Strict** keywords (``amazon``, ``kiro``, ``aws``, ``grok``,
+      ``gpt``, ``ernie``, ``kimi``) must appear after an identity
+      anchor phrase (``"I am"`` / ``"made by"`` / ``"我是"`` / ...).
+      Eliminates false positives like ``"I am Claude, not GPT"``
+      and ``"I grok your question"``.
+    - **Lax** keywords (``deepseek``, ``glm``, ``qwen``, ``minimax``,
+      etc.) use word-boundary + non-letter lookahead because these
+      distinctive tokens don't appear in ordinary prose.
+    - **CJK** keywords (``通义``, ``千问``, ...) use substring match
+      because Python's ``re`` engine has no useful word-boundary
+      semantics for CJK scripts.
 
     Args:
-        text: The model response text to scan. Empty string, None, or
-            anything falsy returns an empty list.
+        text: The model response text to scan. Empty / None returns [].
 
     Returns:
-        A sorted list of matched keywords (in their original form as
-        defined in ``NON_CLAUDE_IDENTITY_KEYWORDS``). An empty list
-        means no non-Claude identity was detected.
+        Sorted list of matched keywords (in their canonical form
+        from ``NON_CLAUDE_IDENTITY_KEYWORDS``). Empty if no match.
 
     Examples:
         >>> find_non_claude_identities("I am Claude, made by Anthropic.")
         []
+        >>> find_non_claude_identities("I am Claude, not GPT, made by Anthropic.")
+        []
+        >>> find_non_claude_identities("I am GPT-5 by OpenAI.")
+        ['gpt']
         >>> find_non_claude_identities("I'm DeepSeek-V3, an assistant.")
         ['deepseek']
         >>> find_non_claude_identities("我是通义千问,由阿里巴巴创建。")
@@ -154,7 +224,10 @@ def find_non_claude_identities(text: str) -> list:
     if not text:
         return []
     matched = []
-    for keyword, pattern in _ASCII_KEYWORD_PATTERNS:
+    for keyword, pattern in _STRICT_ASCII_PATTERNS:
+        if pattern.search(text):
+            matched.append(keyword)
+    for keyword, pattern in _LAX_ASCII_PATTERNS:
         if pattern.search(text):
             matched.append(keyword)
     for keyword in _CJK_KEYWORDS:

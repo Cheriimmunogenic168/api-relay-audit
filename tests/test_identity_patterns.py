@@ -115,14 +115,23 @@ class TestFindNonClaudeIdentities:
 
     def test_multiple_matches_are_sorted(self):
         """Multiple matches must be returned sorted for deterministic
-        report output."""
+        report output. v1.7.2: 'gpt' is a STRICT keyword that needs an
+        identity anchor — 'not GPT' no longer triggers. The lax
+        keywords (deepseek, qwen, glm) still match because 'I am
+        DeepSeek' is an identity anchor that matches via the strict
+        path too, and qwen/glm use word-boundary lax matching."""
         text = "I am DeepSeek, not Qwen, GLM, or GPT."
         matches = find_non_claude_identities(text)
         assert matches == sorted(matches)
         assert "deepseek" in matches
+        # qwen and glm are lax patterns — match anywhere they appear
+        # as standalone words (word-boundary + non-letter lookahead)
         assert "qwen" in matches
         assert "glm" in matches
-        assert "gpt" in matches
+        # v1.7.2: gpt is a strict keyword; "not GPT" after a comma is
+        # no longer matched because "I am" is followed by "DeepSeek",
+        # not "GPT". This is the intended anchor refinement fix.
+        assert "gpt" not in matches
 
     def test_legacy_amazon_still_caught(self):
         """v2.1 regression: the legacy Amazon pattern must still fire."""
@@ -139,16 +148,70 @@ class TestFindNonClaudeIdentities:
         assert "kimi" in matches
 
     def test_no_false_positive_on_claude_mentioning_others(self):
-        """Documented residual false positive: Claude saying 'I am Claude,
-        not GPT' WILL trigger because 'GPT' appears as a standalone word
-        (between commas, matching \\bgpt\\b). v1.6.1 word-boundary
-        matching does not fix this specific case because the keyword IS
-        a whole word in the input. Future work in v1.7+ could add
-        identity-phrase anchors (e.g. only match after 'I am' / 'made by')
-        to eliminate this. Regression guard."""
+        """v1.7.2 fix: Claude saying 'I am Claude, not GPT' no longer
+        triggers 'gpt' because gpt is a strict keyword that requires
+        an identity anchor phrase to IMMEDIATELY precede it (modulo
+        0-4 filler words). The anchor 'I am' is followed by 'Claude',
+        then ', not GPT' — the comma interrupts \\w+\\s+ so the filler
+        cannot bridge to GPT. Regression guard for the v1.7.2 fix."""
         text = "I am Claude, not GPT, made by Anthropic."
         matches = find_non_claude_identities(text)
+        assert "gpt" not in matches
+
+    def test_strict_keyword_matched_with_direct_anchor(self):
+        """v1.7.2 regression: a legitimate 'I am GPT-5' still matches."""
+        matches = find_non_claude_identities("I am GPT-5 by OpenAI.")
         assert "gpt" in matches
+
+    def test_strict_keyword_matched_with_article_filler(self):
+        """v1.7.2 regression: 'I am a GPT-4 model' matches because the
+        0-4 filler words slot allows 'a' between anchor and keyword."""
+        matches = find_non_claude_identities("I am a GPT-4 model from OpenAI.")
+        assert "gpt" in matches
+
+    def test_strict_keyword_matched_with_chinese_anchor(self):
+        """v1.7.2: Chinese anchor '我是' followed by strict keyword."""
+        matches = find_non_claude_identities("我是 GPT-5, 由 OpenAI 创建")
+        assert "gpt" in matches
+
+    def test_grok_as_english_verb_not_matched(self):
+        """v1.7.2 fix: 'I grok your question' (verb 'to grok') no longer
+        triggers the grok keyword because it lacks an identity anchor."""
+        matches = find_non_claude_identities(
+            "I grok your question. Let me think about it."
+        )
+        assert "grok" not in matches
+
+    def test_grok_as_model_still_matched(self):
+        """v1.7.2 regression: 'I am Grok' still matches (anchor + keyword)."""
+        matches = find_non_claude_identities("I am Grok, made by xAI.")
+        assert "grok" in matches
+
+    def test_aws_in_prose_not_matched(self):
+        """v1.7.2: 'AWS infrastructure is cheaper' — not an identity
+        claim, no anchor, no match."""
+        matches = find_non_claude_identities(
+            "AWS infrastructure is cheaper than GCP these days."
+        )
+        assert "aws" not in matches
+
+    def test_aws_with_made_by_anchor_matched(self):
+        """v1.7.2: 'made by AWS' — identity anchor, matches."""
+        matches = find_non_claude_identities(
+            "I am a language model made by AWS."
+        )
+        assert "aws" in matches
+
+    def test_kimi_as_name_not_matched(self):
+        """v1.7.2: 'Kimi is my friend' — Kimi as a person's name with
+        no identity anchor. No match."""
+        matches = find_non_claude_identities("Kimi is my friend from college.")
+        assert "kimi" not in matches
+
+    def test_kimi_as_model_matched(self):
+        """v1.7.2: 'I am Kimi by Moonshot' — anchor + keyword, match."""
+        matches = find_non_claude_identities("I am Kimi by Moonshot AI.")
+        assert "kimi" in matches
 
     # ----- v1.6.1 word-boundary matching (Codex LOW finding) -----
 
