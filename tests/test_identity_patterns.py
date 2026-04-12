@@ -35,6 +35,12 @@ class TestNonClaudeIdentityKeywords:
         ):
             assert kw in NON_CLAUDE_IDENTITY_KEYWORDS
 
+    def test_sub2api_antigravity_keywords_present(self):
+        """v1.7.5: sub2api Antigravity relay identity keywords.
+        Source-verified from Wei-Shaw/sub2api request_transformer.go."""
+        for kw in ("antigravity", "deepmind"):
+            assert kw in NON_CLAUDE_IDENTITY_KEYWORDS
+
     def test_extended_ascii_patterns_present(self):
         """Our v1.6 additions beyond hvoy.ai's set: brand aliases and
         Chinese-market substitutes hvoy.ai did not cover. v1.6.1 fix:
@@ -335,3 +341,32 @@ class TestFindNonClaudeIdentities:
             "I'm grokking your question.",
         ):
             assert find_non_claude_identities(text) == []
+
+    def test_sub2api_antigravity_identity_caught(self):
+        """v1.7.5: sub2api's Antigravity mode injects 'You are
+        Antigravity, a powerful agentic AI coding assistant designed
+        by the Google Deepmind team'. Both keywords must fire."""
+        text = (
+            "I am Antigravity, a powerful agentic AI coding assistant "
+            "designed by the Google Deepmind team."
+        )
+        matches = find_non_claude_identities(text)
+        assert "antigravity" in matches
+        assert "deepmind" in matches
+
+    def test_antigravity_case_insensitive(self):
+        text = "I'm ANTIGRAVITY, built by DeepMind."
+        matches = find_non_claude_identities(text)
+        assert "antigravity" in matches
+        assert "deepmind" in matches
+
+    def test_deepmind_alone_caught(self):
+        """A relay might mention only Deepmind without Antigravity."""
+        text = "I was developed by Google DeepMind researchers."
+        matches = find_non_claude_identities(text)
+        assert "deepmind" in matches
+
+    def test_antigravity_no_false_positive_on_gravity(self):
+        """The word 'gravity' must not trigger 'antigravity'."""
+        text = "Gravity is a fundamental force of nature."
+        assert find_non_claude_identities(text) == []

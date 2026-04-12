@@ -93,7 +93,11 @@ NON_CLAUDE_IDENTITY_KEYWORDS = (
     "minimax",
     "grok",
     "gpt",
-    # 3. Extended ASCII (our additions — aliases and Chinese-market
+    # 3. sub2api / Antigravity relay identity (v1.7.5, source-verified
+    #    from Wei-Shaw/sub2api request_transformer.go:179-186)
+    "antigravity",  # sub2api injected identity: "You are Antigravity"
+    "deepmind",     # sub2api injected identity: "designed by the Google Deepmind team"
+    # 4. Extended ASCII (our additions — aliases and Chinese-market
     #    substitutes not in hvoy.ai's set)
     "zhipu",     # Zhipu AI, parent of GLM
     "tongyi",    # Alibaba Tongyi, parent of Qwen
@@ -101,7 +105,7 @@ NON_CLAUDE_IDENTITY_KEYWORDS = (
     "doubao",    # ByteDance Doubao
     "moonshot",  # Moonshot AI
     "kimi",      # Moonshot's Kimi product
-    # 4. Chinese brand names (catch Chinese-language responses)
+    # 5. Chinese brand names (catch Chinese-language responses)
     "通义",
     "千问",
     "智谱",

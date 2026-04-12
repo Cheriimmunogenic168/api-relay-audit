@@ -1006,6 +1006,8 @@ NON_CLAUDE_IDENTITY_KEYWORDS = (
     "amazon", "kiro", "aws",
     # hvoy.ai verified ASCII substitutes
     "glm", "z.ai", "deepseek", "qwen", "minimax", "grok", "gpt",
+    # sub2api / Antigravity relay identity (v1.7.5, source-verified)
+    "antigravity", "deepmind",
     # Extended ASCII (our additions)
     "zhipu", "tongyi", "ernie", "doubao", "moonshot", "kimi",
     # Chinese brand names (catch Chinese-language responses)
