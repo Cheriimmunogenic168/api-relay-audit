@@ -261,6 +261,14 @@ class TestStructuralLeakHelper:
     def test_my_guidelines_equals_space(self, modular):
         assert modular._matches_structural_leak("my guidelines= be helpful")
 
+    def test_pipe_is_not_a_valid_separator(self, modular):
+        """v1.7.5 follow-up: [:|=] accidentally included | as a literal
+        pipe character in the character class. Pipes are not prompt
+        disclosure separators and must not trigger a structural hit."""
+        assert not modular._matches_structural_leak("system prompt| abc")
+        assert not modular._matches_structural_leak("my instructions| do this")
+        assert not modular._matches_structural_leak("my guidelines| be helpful")
+
     def test_system_prompt_was(self, modular):
         assert modular._matches_structural_leak("my system prompt was hidden")
 

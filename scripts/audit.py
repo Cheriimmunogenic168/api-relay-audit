@@ -103,9 +103,9 @@ STRUCTURAL_LEAK_PATTERNS = (
     # "system prompt is: ..." / "system prompt was ..." / "system prompt:"
     # Word alternatives use \b; punctuation : = do not (no word boundary
     # between ':' and a space, so \b after ':' would silently fail).
-    re.compile(r"\bsystem prompt\s*(?:(?:is|was|contains)\b|[:|=])", re.I),
+    re.compile(r"\bsystem prompt\s*(?:(?:is|was|contains)\b|[:=])", re.I),
     # "my instructions are: ..." / "my guidelines were: ..."
-    re.compile(r"\bmy (?:instructions?|guidelines?)\s*(?:(?:are|is|were|was)\b|[:|=])", re.I),
+    re.compile(r"\bmy (?:instructions?|guidelines?)\s*(?:(?:are|is|were|was)\b|[:=])", re.I),
     # "You are a/an <role> assistant|agent|ai|model|bot|expert|engineer"
     # Matches prompt-template openers like "You are a coding assistant";
     # does NOT match "You are correct" or "You are asking about something".

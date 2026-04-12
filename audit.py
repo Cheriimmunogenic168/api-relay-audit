@@ -1840,8 +1840,8 @@ REFUSAL_MARKERS = (
 
 # Structural prompt-template patterns — applied to original-case text.
 STRUCTURAL_LEAK_PATTERNS = (
-    re.compile(r"\bsystem prompt\s*(?:(?:is|was|contains)\b|[:|=])", re.I),
-    re.compile(r"\bmy (?:instructions?|guidelines?)\s*(?:(?:are|is|were|was)\b|[:|=])", re.I),
+    re.compile(r"\bsystem prompt\s*(?:(?:is|was|contains)\b|[:=])", re.I),
+    re.compile(r"\bmy (?:instructions?|guidelines?)\s*(?:(?:are|is|were|was)\b|[:=])", re.I),
     re.compile(
         r"\byou are an?\s+[a-z]+\s+"
         r"(?:assistant|agent|ai|model|bot|expert|developer|engineer|tool|helper)\b",
