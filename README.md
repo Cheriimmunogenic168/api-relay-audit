@@ -468,6 +468,10 @@ See [`ROADMAP.md`](./ROADMAP.md#-architectural-invariants-must-preserve) for the
 
 ---
 
+## Contributing
+
+Read [`CLAUDE.md`](./CLAUDE.md) for architecture context, module responsibilities, and test commands. Run `python -m pytest tests/ -v` before submitting a PR.
+
 ## Author
 
 [@li9292](https://x.com/li9292)
