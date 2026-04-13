@@ -3,283 +3,1003 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>API 中转站安全检测报告</title>
+<title>API Relay Audit — AI 中转站安全审计</title>
+<meta name="description" content="开源 11 步安全审计工具，检测 AI API 中转站的 Token 注入、Prompt 泄露、身份替换、工具调用改写等安全风险。本地运行，Key 不离开你的机器。">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-:root{--bg:#0a0e17;--card:#111827;--card-hover:#1a2332;--border:#1e293b;--text:#e2e8f0;--text2:#94a3b8;--accent:#3b82f6;--green:#10b981;--yellow:#f59e0b;--red:#ef4444;--gray:#6b7280}
-body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-height:100vh}
-.container{max-width:1100px;margin:0 auto;padding:40px 20px}
-h1{font-size:1.8rem;font-weight:700;text-align:center;margin-bottom:8px;background:linear-gradient(135deg,#60a5fa,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-.subtitle{text-align:center;color:var(--text2);font-size:.9rem;margin-bottom:40px}
-.ranking{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:30px}
-.ranking h2{font-size:1.1rem;margin-bottom:12px;color:var(--accent)}
-.ranking-list{display:flex;gap:10px;flex-wrap:wrap}
-.ranking-item{padding:6px 12px;border-radius:8px;font-size:.85rem;background:rgba(255,255,255,.03)}
-.ranking-item.safe{border-left:3px solid var(--green)}
-.ranking-item.warn{border-left:3px solid var(--yellow)}
-.ranking-item.danger{border-left:3px solid var(--red)}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:20px;margin-bottom:40px}
-.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:24px;cursor:pointer;transition:all .2s;position:relative;overflow:hidden}
-.card:hover{background:var(--card-hover);border-color:#334155;transform:translateY(-2px)}
-.card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px}
-.card.red::before{background:var(--red)}.card.yellow::before{background:var(--yellow)}.card.green::before{background:var(--green)}.card.gray::before{background:var(--gray)}
-.card-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;gap:8px}
-.domain{font-size:1.1rem;font-weight:600;font-family:'SF Mono',Monaco,monospace;flex:1}
-.badge{padding:4px 10px;border-radius:20px;font-size:.75rem;font-weight:600;white-space:nowrap}
-.badge.red{background:rgba(239,68,68,.15);color:#fca5a5}.badge.yellow{background:rgba(245,158,11,.15);color:#fcd34d}.badge.green{background:rgba(16,185,129,.15);color:#6ee7b7}.badge.gray{background:rgba(107,114,128,.15);color:#d1d5db}
-.api-format{font-size:.7rem;color:var(--text2);margin-top:4px;font-family:monospace}
-.card-meta{display:flex;gap:16px;color:var(--text2);font-size:.8rem;margin-bottom:16px;flex-wrap:wrap}
-.metrics{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.metric{background:rgba(255,255,255,.03);border-radius:8px;padding:10px 12px}
-.metric-label{font-size:.7rem;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
-.metric-value{font-size:.95rem;font-weight:600}
-.metric-value.warn{color:var(--yellow)}.metric-value.danger{color:var(--red)}.metric-value.ok{color:var(--green)}
-.expand-hint{text-align:center;color:var(--text2);font-size:.75rem;margin-top:12px;opacity:.6}
-.detail{display:none;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:28px;margin-bottom:20px;animation:fadeIn .3s}
-.detail.active{display:block}
-@keyframes fadeIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
-.detail-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border)}
-.detail h2{font-size:1.3rem;font-weight:700}
-.test-time{font-size:.8rem;color:var(--text2);margin-top:4px}
-.close-btn{background:none;border:1px solid var(--border);color:var(--text2);padding:6px 14px;border-radius:8px;cursor:pointer;font-size:.85rem}
-.close-btn:hover{border-color:#475569;color:var(--text)}
-.section{margin-bottom:24px}
-.section h3{font-size:.9rem;font-weight:600;color:var(--accent);margin-bottom:12px;display:flex;align-items:center;gap:8px}
-.info-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
-.info-item{background:rgba(255,255,255,.03);border-radius:8px;padding:12px}
-.info-item .label{font-size:.7rem;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
-.info-item .value{font-size:.9rem}
-.flags{display:flex;flex-wrap:wrap;gap:8px}
-.flag{background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.2);color:#fca5a5;padding:6px 12px;border-radius:8px;font-size:.8rem}
-.test-table{width:100%;border-collapse:collapse;font-size:.85rem;margin-top:8px}
-.test-table th{text-align:left;padding:8px 12px;color:var(--text2);font-weight:500;border-bottom:1px solid var(--border);font-size:.75rem;text-transform:uppercase;letter-spacing:.5px}
-.test-table td{padding:8px 12px;border-bottom:1px solid rgba(30,41,59,.5)}
+:root{
+  --bg:#0a0e17;--bg2:#0d1220;--card:#111827;--card-hover:#1a2332;
+  --border:#1e293b;--border2:#283548;
+  --text:#e2e8f0;--text2:#94a3b8;--text3:#64748b;
+  --accent:#3b82f6;--accent2:#60a5fa;
+  --green:#10b981;--yellow:#f59e0b;--red:#ef4444;--gray:#6b7280;
+  --radius:10px;
+}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans SC',sans-serif;line-height:1.6;-webkit-font-smoothing:antialiased}
+
+/* ── Nav ── */
+nav{position:fixed;top:0;left:0;right:0;z-index:100;background:rgba(10,14,23,.85);backdrop-filter:blur(12px);border-bottom:1px solid var(--border)}
+.nav-inner{max-width:960px;margin:0 auto;padding:12px 24px;display:flex;justify-content:space-between;align-items:center}
+.nav-logo{font-weight:700;font-size:1rem;color:var(--text);text-decoration:none;display:flex;align-items:center;gap:8px}
+.nav-logo span{background:linear-gradient(135deg,var(--accent2),#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.nav-links{display:flex;gap:20px;align-items:center}
+.nav-links a{color:var(--text2);font-size:.85rem;text-decoration:none;transition:color .2s}
+.nav-links a:hover{color:var(--text)}
+.lang-switch{display:flex;gap:2px;background:var(--card);border:1px solid var(--border);border-radius:6px;overflow:hidden}
+.lang-btn{padding:4px 8px;font-size:.7rem;background:none;border:none;color:var(--text3);cursor:pointer;transition:all .2s}
+.lang-btn.active{background:var(--accent);color:#fff}
+.lang-btn:hover:not(.active){color:var(--text)}
+
+/* ── Sections ── */
+.container{max-width:960px;margin:0 auto;padding:0 24px}
+section{padding:80px 0 50px}
+section:first-of-type{padding-top:100px}
+
+/* ── Hero ── */
+.hero{text-align:center}
+.hero h1{font-size:2.2rem;font-weight:800;margin-bottom:16px;letter-spacing:-.02em}
+.hero h1 .gradient{background:linear-gradient(135deg,var(--accent2),#a78bfa,#f472b6);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.hero-sub{color:var(--text2);font-size:1.05rem;max-width:600px;margin:0 auto 12px;line-height:1.7}
+.hero-stats{display:flex;justify-content:center;gap:32px;margin:20px 0 28px;flex-wrap:wrap}
+.stat{text-align:center}
+.stat-num{font-size:1.6rem;font-weight:700;color:var(--accent2)}
+.stat-label{font-size:.75rem;color:var(--text3);margin-top:2px}
+.hero-cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-bottom:0}
+.btn{padding:10px 24px;border-radius:8px;font-size:.9rem;font-weight:600;text-decoration:none;transition:all .2s;cursor:pointer;border:none;display:inline-flex;align-items:center;gap:8px}
+.btn-primary{background:var(--accent);color:#fff}.btn-primary:hover{background:#2563eb}
+.btn-secondary{background:transparent;border:1px solid var(--border2);color:var(--text2)}.btn-secondary:hover{border-color:var(--accent);color:var(--text)}
+.security-badge{display:inline-flex;align-items:center;gap:6px;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.2);color:var(--green);padding:8px 16px;border-radius:20px;font-size:.8rem;margin-bottom:8px}
+
+/* ── Demo Report ── */
+.demo-section h2{font-size:1.4rem;font-weight:700;margin-bottom:8px;text-align:center}
+.demo-subtitle{text-align:center;color:var(--text2);font-size:.9rem;margin-bottom:32px}
+.demo-tabs{display:flex;gap:8px;margin-bottom:20px;justify-content:center;flex-wrap:wrap}
+.demo-tab{padding:8px 16px;border-radius:8px;font-size:.82rem;background:var(--card);border:1px solid var(--border);color:var(--text2);cursor:pointer;transition:all .2s}
+.demo-tab.active{border-color:var(--accent);color:var(--accent);background:rgba(59,130,246,.08)}
+.demo-tab:hover:not(.active){border-color:var(--border2);color:var(--text)}
+.demo-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;display:none}
+.demo-card.active{display:block}
+.demo-bar{height:3px}
+.demo-bar.red{background:var(--red)}.demo-bar.yellow{background:var(--yellow)}.demo-bar.green{background:var(--green)}
+.demo-head{padding:24px 28px 16px;display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px}
+.demo-domain{font-size:1.15rem;font-weight:700;font-family:'SF Mono',Monaco,'Cascadia Code',monospace}
+.demo-badge{padding:4px 12px;border-radius:20px;font-size:.78rem;font-weight:600}
+.demo-badge.red{background:rgba(239,68,68,.12);color:#fca5a5}
+.demo-badge.yellow{background:rgba(245,158,11,.12);color:#fcd34d}
+.demo-badge.green{background:rgba(16,185,129,.12);color:#6ee7b7}
+.demo-meta{padding:0 28px 16px;display:flex;gap:16px;color:var(--text3);font-size:.8rem;flex-wrap:wrap}
+.demo-grid{padding:0 28px 24px;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+.demo-metric{background:rgba(255,255,255,.025);border-radius:8px;padding:14px 16px}
+.demo-metric-label{font-size:.7rem;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+.demo-metric-value{font-size:.95rem;font-weight:600}
+.demo-metric-value.ok{color:var(--green)}.demo-metric-value.warn{color:var(--yellow)}.demo-metric-value.danger{color:var(--red)}
+.demo-detail{padding:0 28px 24px}
+.demo-table{width:100%;border-collapse:collapse;font-size:.82rem}
+.demo-table th{text-align:left;padding:8px 12px;color:var(--text3);font-weight:500;border-bottom:1px solid var(--border);font-size:.72rem;text-transform:uppercase;letter-spacing:.5px}
+.demo-table td{padding:8px 12px;border-bottom:1px solid rgba(30,41,59,.4)}
 .pass{color:var(--green)}.fail{color:var(--red)}.warn-text{color:var(--yellow)}
-.summary-text{color:var(--text2);font-size:.9rem;line-height:1.7;background:rgba(255,255,255,.02);padding:16px;border-radius:8px;border-left:3px solid var(--accent)}
-footer{text-align:center;color:var(--text2);font-size:.75rem;margin-top:60px;padding:20px;border-top:1px solid var(--border)}
+.demo-flags{padding:0 28px 24px;display:flex;flex-wrap:wrap;gap:8px}
+.flag{background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.18);color:#fca5a5;padding:5px 12px;border-radius:6px;font-size:.78rem}
+.demo-note{text-align:center;color:var(--text3);font-size:.78rem;margin-top:16px}
+
+/* ── How it works ── */
+.steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;margin-top:32px}
+.step{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:24px}
+.step-num{font-size:.7rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px}
+.step h3{font-size:1rem;font-weight:600;margin-bottom:8px}
+.step p{color:var(--text2);font-size:.85rem;line-height:1.6}
+
+/* ── Install / CTA ── */
+.install-section{padding-top:40px}
+.install-section h2{font-size:1.4rem;font-weight:700;margin-bottom:8px;text-align:center}
+.install-sub{color:var(--text2);font-size:.9rem;margin-bottom:28px;text-align:center}
+
+/* Form */
+.audit-form-wrapper{max-width:560px;margin:0 auto 28px}
+.audit-form{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:28px;position:relative}
+.form-row{margin-bottom:16px}
+.form-row:last-of-type{margin-bottom:0}
+.form-label{display:block;font-size:.78rem;color:var(--text2);margin-bottom:6px;font-weight:500}
+.form-input{width:100%;padding:10px 14px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.88rem;font-family:inherit;outline:none;transition:border-color .2s}
+.form-input:focus{border-color:var(--accent)}
+.form-input::placeholder{color:var(--text3)}
+.form-select{width:100%;padding:10px 14px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.88rem;font-family:inherit;outline:none;-webkit-appearance:none;appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;cursor:pointer}
+.form-select:focus{border-color:var(--accent)}
+.form-hint{font-size:.72rem;color:var(--text3);margin-top:4px}
+.generate-btn{width:100%;padding:12px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:.92rem;font-weight:600;cursor:pointer;transition:background .2s;margin-top:20px}
+.generate-btn:hover{background:#2563eb}
+
+/* Generated command */
+.generated-cmd{display:none;max-width:560px;margin:0 auto 20px}
+.generated-cmd.visible{display:block}
+.cmd-steps{margin-bottom:16px}
+.cmd-step{display:flex;gap:12px;align-items:flex-start;margin-bottom:12px}
+.cmd-step-num{width:24px;height:24px;background:var(--accent);color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.72rem;font-weight:700;flex-shrink:0;margin-top:2px}
+.cmd-step-text{font-size:.85rem;color:var(--text2);line-height:1.5}
+.cmd-block{background:#0d1117;border:1px solid var(--border);border-radius:var(--radius);padding:16px 20px;font-family:'SF Mono',Monaco,'Cascadia Code',monospace;font-size:.82rem;color:var(--accent2);position:relative;overflow-x:auto;line-height:1.7;word-break:break-all}
+.cmd-block .comment{color:var(--text3)}
+.copy-btn{position:absolute;top:10px;right:10px;background:var(--card);border:1px solid var(--border);color:var(--text3);padding:4px 10px;border-radius:6px;font-size:.72rem;cursor:pointer;transition:all .2s}
+.copy-btn:hover{color:var(--text);border-color:var(--border2)}
+
+/* Security flow */
+.security-flow{max-width:560px;margin:0 auto 20px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px 24px}
+.flow-title{font-size:.82rem;font-weight:600;color:var(--green);margin-bottom:14px;display:flex;align-items:center;gap:8px}
+.flow-diagram{display:flex;align-items:center;justify-content:center;gap:0;flex-wrap:wrap;font-size:.78rem;padding:4px 0}
+.flow-node{padding:8px 14px;border-radius:8px;text-align:center;white-space:nowrap}
+.flow-node.you{background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.25);color:var(--accent2)}
+.flow-node.local{background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.2);color:var(--green)}
+.flow-node.relay{background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.2);color:var(--yellow)}
+.flow-node.danger{background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.18);color:#fca5a5}
+.flow-arrow{color:var(--text3);font-size:.9rem;padding:0 6px;flex-shrink:0}
+.flow-vs{display:flex;align-items:center;gap:12px;margin-top:14px;padding-top:14px;border-top:1px solid var(--border);font-size:.75rem;color:var(--text3)}
+.flow-vs-bad{color:var(--red);display:flex;align-items:center;gap:4px}
+.flow-vs-good{color:var(--green);display:flex;align-items:center;gap:4px}
+
+.cost-badge{display:inline-flex;align-items:center;gap:4px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.15);color:var(--yellow);padding:4px 12px;border-radius:12px;font-size:.78rem;margin-top:8px}
+.install-note{color:var(--text3);font-size:.8rem;margin-top:16px;display:flex;align-items:center;justify-content:center;gap:6px;text-align:center}
+
+/* ── Comparison table ── */
+.compare-section h2{font-size:1.4rem;font-weight:700;margin-bottom:8px;text-align:center}
+.compare-sub{text-align:center;color:var(--text2);font-size:.9rem;margin-bottom:28px}
+.compare-table{width:100%;border-collapse:collapse;font-size:.82rem;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.compare-table th{padding:12px 16px;text-align:left;font-weight:600;border-bottom:1px solid var(--border);font-size:.78rem}
+.compare-table th:first-child{color:var(--text2)}
+.compare-table th.ours{color:var(--accent2)}
+.compare-table td{padding:10px 16px;border-bottom:1px solid rgba(30,41,59,.3)}
+.compare-table td:first-child{color:var(--text2);font-size:.8rem}
+.compare-table tr:last-child td{border-bottom:none}
+.compare-table .check{color:var(--green)}.compare-table .cross{color:var(--text3)}.compare-table .soon{color:var(--yellow)}
+
+/* ── FAQ ── */
+.faq-section h2{font-size:1.4rem;font-weight:700;margin-bottom:28px;text-align:center}
+.faq-item{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:10px;overflow:hidden}
+.faq-q{padding:16px 20px;cursor:pointer;font-weight:600;font-size:.9rem;display:flex;justify-content:space-between;align-items:center;transition:background .2s}
+.faq-q:hover{background:var(--card-hover)}
+.faq-q::after{content:'+';color:var(--text3);font-size:1.1rem;transition:transform .2s}
+.faq-item.open .faq-q::after{content:'-'}
+.faq-a{padding:0 20px;max-height:0;overflow:hidden;transition:max-height .3s ease,padding .3s ease;color:var(--text2);font-size:.85rem;line-height:1.7}
+.faq-item.open .faq-a{padding:0 20px 16px;max-height:600px}
+.faq-a a{color:var(--accent2);text-decoration:none}
+.faq-a a:hover{text-decoration:underline}
+
+/* ── Footer ── */
+footer{text-align:center;padding:40px 24px;border-top:1px solid var(--border);color:var(--text3);font-size:.78rem}
+footer a{color:var(--text2);text-decoration:none}
+footer a:hover{color:var(--text)}
+
+/* ── Responsive ── */
+@media(max-width:640px){
+  .hero h1{font-size:1.6rem}
+  .hero-stats{gap:20px}
+  .stat-num{font-size:1.3rem}
+  .demo-head{padding:16px 16px 12px}
+  .demo-meta,.demo-grid,.demo-detail,.demo-flags{padding-left:16px;padding-right:16px}
+  .nav-links a.hide-mobile{display:none}
+  .compare-table{font-size:.72rem}
+  .compare-table th,.compare-table td{padding:8px 10px}
+}
+
+/* ── Audit Tabs ── */
+.audit-tabs{display:flex;gap:8px;margin-bottom:24px;justify-content:center}
+.audit-tab{padding:10px 24px;border-radius:8px;font-size:.88rem;font-weight:600;background:var(--card);border:1px solid var(--border);color:var(--text2);cursor:pointer;transition:all .2s}
+.audit-tab.active{border-color:var(--accent);color:var(--accent);background:rgba(59,130,246,.08)}
+.audit-tab:hover:not(.active){border-color:var(--border2);color:var(--text)}
+.tab-panel{display:none}
+.tab-panel.active{display:block}
+
+/* Agent tab */
+.agent-pitch{text-align:center;color:var(--text2);font-size:.95rem;margin-bottom:24px;line-height:1.6}
+.agent-steps{max-width:560px;margin:0 auto}
+.agent-step{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px 24px;margin-bottom:14px}
+.agent-step-head{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.agent-step-num{width:26px;height:26px;background:var(--accent);color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:700;flex-shrink:0}
+.agent-step-title{font-size:.9rem;font-weight:600}
+.agent-step p{color:var(--text2);font-size:.83rem;line-height:1.6;margin-bottom:10px}
+.agent-cmd{background:#0d1117;border:1px solid var(--border);border-radius:8px;padding:14px 18px;font-family:'SF Mono',Monaco,'Cascadia Code',monospace;font-size:.8rem;color:var(--accent2);position:relative;overflow-x:auto;line-height:1.6;word-break:break-all}
+.agent-trigger{background:rgba(59,130,246,.06);border:1px solid rgba(59,130,246,.15);border-radius:8px;padding:14px 18px;font-size:.88rem;color:var(--text);font-style:italic;text-align:center}
+.agent-note{text-align:center;color:var(--text3);font-size:.78rem;margin-top:16px;display:flex;align-items:center;justify-content:center;gap:6px}
+
+/* ── Terminal Demo Animation ── */
+.terminal-demo{max-width:560px;margin:24px auto 0;background:#0d1117;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;display:none}
+.terminal-demo.visible{display:block}
+.term-bar{background:#161b22;padding:8px 14px;display:flex;align-items:center;gap:6px}
+.term-dot{width:10px;height:10px;border-radius:50%}
+.term-dot.r{background:#ff5f57}.term-dot.y{background:#febc2e}.term-dot.g{background:#28c840}
+.term-bar-title{color:var(--text3);font-size:.7rem;margin-left:8px;font-family:monospace}
+.term-body{padding:16px 18px;font-family:'SF Mono',Monaco,'Cascadia Code',monospace;font-size:.78rem;line-height:1.8;color:var(--text2);min-height:160px}
+.term-line{opacity:0;transform:translateY(4px);animation:termIn .3s forwards}
+.term-line .prompt{color:var(--green)}
+.term-line .out{color:var(--text3)}
+.term-line .highlight{color:var(--accent2)}
+.term-line .warn{color:var(--yellow)}
+.term-line .ok{color:var(--green)}
+@keyframes termIn{to{opacity:1;transform:translateY(0)}}
+
+/* ── Hidden i18n ── */
+[data-i18n]{transition:opacity .15s}
 </style>
 </head>
 <body>
-<div class="container">
-  <h1>🛡️ API 中转站安全检测报告</h1>
-  <p class="subtitle">检测中转站是否存在 Token 注入、Prompt 泄露、指令覆盖、工具调用改写 (AC-1.a)、错误响应凭证回显 (AC-2) 等安全风险 · <a href="https://arxiv.org/abs/2604.08407" style="color:var(--text2)">threat model: arXiv:2604.08407</a></p>
-  <div class="ranking" id="ranking"></div>
-  <div class="grid" id="cards"></div>
-  <div id="detail"></div>
-  <footer>Powered by API Relay Audit</footer>
-</div>
+
+<!-- ── Nav ── -->
+<nav>
+  <div class="nav-inner">
+    <a class="nav-logo" href="#">
+      <span>API Relay Audit</span>
+    </a>
+    <div class="nav-links">
+      <a href="#demo" class="hide-mobile" data-i18n="nav_demo">Demo</a>
+      <a href="#install" class="hide-mobile" data-i18n="nav_install">Quick Start</a>
+      <a href="#faq" class="hide-mobile" data-i18n="nav_faq">FAQ</a>
+      <a href="https://github.com/toby-bridges/api-relay-audit" target="_blank" rel="noopener noreferrer">GitHub</a>
+      <a href="https://x.com/li9292" target="_blank" rel="noopener noreferrer">X</a>
+      <div class="lang-switch">
+        <button class="lang-btn active" onclick="setLang('zh')">中</button>
+        <button class="lang-btn" onclick="setLang('en')">EN</button>
+      </div>
+    </div>
+  </div>
+</nav>
+
+<!-- ── Hero ── -->
+<section class="hero container">
+  <div class="security-badge">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+    <span data-i18n="hero_badge">Local execution — your API Key is never sent to a third-party server</span>
+  </div>
+  <h1 data-i18n="hero_title"><span class="gradient">AI API Relay</span> Security Audit</h1>
+  <div class="hero-stats">
+    <div class="stat"><div class="stat-num">11</div><div class="stat-label" data-i18n="stat_steps">Audit Steps</div></div>
+    <div class="stat"><div class="stat-num">6D</div><div class="stat-label" data-i18n="stat_matrix">Risk Matrix</div></div>
+    <div class="stat"><div class="stat-num">493</div><div class="stat-label" data-i18n="stat_tests">Unit Tests</div></div>
+    <div class="stat"><div class="stat-num">0</div><div class="stat-label" data-i18n="stat_deps">Dependencies (standalone)</div></div>
+  </div>
+  <div class="hero-cta">
+    <a class="btn btn-primary" href="#install" data-i18n="cta_install">Start Audit</a>
+    <a class="btn btn-secondary" href="#demo" data-i18n="cta_demo">See Demo Report</a>
+  </div>
+</section>
+
+<!-- ── Audit Form (moved to first position for immediate user value) ── -->
+<section class="install-section container" id="install">
+  <!-- Security flow diagram -->
+  <div class="security-flow">
+    <div class="flow-title">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      <span data-i18n="flow_title">How your Key flows — the critical difference</span>
+    </div>
+    <div class="flow-diagram">
+      <div class="flow-node you" data-i18n="flow_you">You</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node local" data-i18n="flow_local">Your Terminal</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node relay" data-i18n="flow_relay">Your Relay</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node you">Anthropic / OpenAI</div>
+    </div>
+    <div class="flow-vs">
+      <span class="flow-vs-good">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>
+        <span data-i18n="flow_good">api-relay-audit: Key stays on YOUR machine</span>
+      </span>
+      <span style="color:var(--text3)">vs</span>
+      <span class="flow-vs-bad">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        <span data-i18n="flow_bad">Web tools: Key goes to a 3rd-party server first</span>
+      </span>
+    </div>
+  </div>
+
+  <!-- Tab switcher -->
+  <div class="audit-tabs">
+    <button class="audit-tab active" onclick="switchAuditTab('human')" data-i18n="tab_human">For Human</button>
+    <button class="audit-tab" onclick="switchAuditTab('agent')" data-i18n="tab_agent">For Agent</button>
+  </div>
+
+  <!-- Tab: Human -->
+  <div class="tab-panel active" id="tab-human">
+
+  <!-- Interactive form -->
+  <div class="audit-form-wrapper">
+    <div class="audit-form">
+      <div class="form-row">
+        <label class="form-label" data-i18n="form_url_label">API Endpoint URL</label>
+        <input class="form-input" type="url" id="f-url" placeholder="https://your-relay.com/v1" spellcheck="false" autocomplete="off">
+        <div class="form-hint" data-i18n="form_url_hint">The base URL of the relay you want to audit</div>
+      </div>
+      <div class="form-row">
+        <label class="form-label" data-i18n="form_key_label">API Key</label>
+        <input class="form-input" type="password" id="f-key" placeholder="sk-..." spellcheck="false" autocomplete="off">
+        <div class="form-hint">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2" style="vertical-align:middle"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          <span data-i18n="form_key_hint">Stays in your browser. Only used to generate the CLI command below — never sent anywhere.</span>
+        </div>
+      </div>
+      <div class="form-row">
+        <label class="form-label" data-i18n="form_model_label">Model</label>
+        <select class="form-select" id="f-model">
+          <option value="claude-opus-4-6">Claude Opus 4.6</option>
+          <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
+          <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5</option>
+        </select>
+      </div>
+      <button class="generate-btn" onclick="generateCmd()" data-i18n="form_generate">Generate Audit Command</button>
+    </div>
+  </div>
+
+  <!-- Generated command output -->
+  <div class="generated-cmd" id="gen-cmd">
+    <div class="cmd-steps">
+      <div class="cmd-step">
+        <div class="cmd-step-num">1</div>
+        <div class="cmd-step-text" data-i18n="cmd_step1">Open your terminal (macOS: Terminal.app / Windows: PowerShell)</div>
+      </div>
+      <div class="cmd-step">
+        <div class="cmd-step-num">2</div>
+        <div class="cmd-step-text" data-i18n="cmd_step2">Paste this command and press Enter — takes ~2 minutes:</div>
+      </div>
+    </div>
+    <div class="cmd-block" id="cmd-output">
+      <button class="copy-btn" onclick="copyCmdOutput()" data-i18n="copy_btn">Copy</button>
+    </div>
+    <div class="cmd-steps" style="margin-top:16px">
+      <div class="cmd-step">
+        <div class="cmd-step-num">3</div>
+        <div class="cmd-step-text" data-i18n="cmd_step3">Done! A Markdown audit report will be saved to your current directory.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Terminal animation: shows what happens after paste -->
+  <div class="terminal-demo" id="term-demo">
+    <div class="term-bar">
+      <div class="term-dot r"></div><div class="term-dot y"></div><div class="term-dot g"></div>
+      <span class="term-bar-title">Terminal</span>
+    </div>
+    <div class="term-body" id="term-body"></div>
+  </div>
+
+  </div><!-- /tab-human -->
+
+  <!-- Tab: Agent -->
+  <div class="tab-panel" id="tab-agent">
+    <p class="agent-pitch" data-i18n="agent_pitch">Install as a Claude Code Skill — say one sentence, the agent runs the full 11-step audit for you.</p>
+
+    <div class="agent-steps">
+      <div class="agent-step">
+        <div class="agent-step-head">
+          <div class="agent-step-num">1</div>
+          <div class="agent-step-title" data-i18n="agent_step1_title">Install the Skill</div>
+        </div>
+        <p data-i18n="agent_step1_desc">Run this once in your terminal to add the audit skill to Claude Code:</p>
+        <div class="agent-cmd">
+          <button class="copy-btn" onclick="copyAgentCmd(this)" data-i18n="copy_btn">Copy</button>
+          mkdir -p ~/.claude/commands && curl -sL https://raw.githubusercontent.com/toby-bridges/api-relay-audit/master/SKILL.md -o ~/.claude/commands/api-relay-audit.md
+        </div>
+      </div>
+
+      <div class="agent-step">
+        <div class="agent-step-head">
+          <div class="agent-step-num">2</div>
+          <div class="agent-step-title" data-i18n="agent_step2_title">Trigger with one sentence</div>
+        </div>
+        <p data-i18n="agent_step2_desc">Open Claude Code and say:</p>
+        <div class="agent-trigger" data-i18n="agent_trigger">"Audit this relay: https://your-relay.com/v1, my key is sk-xxx"</div>
+      </div>
+
+      <div class="agent-step">
+        <div class="agent-step-head">
+          <div class="agent-step-num">3</div>
+          <div class="agent-step-title" data-i18n="agent_step3_title">Agent does everything</div>
+        </div>
+        <p data-i18n="agent_step3_desc">Claude Code automatically downloads the script, runs all 11 steps, and presents the findings — you just read the result.</p>
+      </div>
+    </div>
+
+    <p class="agent-note">
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2" style="vertical-align:middle"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      <span data-i18n="agent_security">Same security model — the agent runs locally on your machine, Key never touches a third-party server.</span>
+    </p>
+  </div><!-- /tab-agent -->
+
+  <div style="text-align:center">
+    <div class="cost-badge">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v12M8 10h8M9 14h6"/></svg>
+      <span data-i18n="cost_note">Each audit costs ~$0.2-0.5 in API usage (billed by your provider)</span>
+    </div>
+
+    <p class="install-note">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      <span data-i18n="install_security">Your API Key is only sent to the relay URL you specify. No telemetry, no third-party servers.</span>
+    </p>
+  </div>
+</section>
+
+<!-- ── Demo Report ── -->
+<section class="demo-section container" id="demo">
+  <h2 data-i18n="demo_title">Audit Report Demo</h2>
+  <p class="demo-subtitle" data-i18n="demo_sub">Real audit results from three relay services — click tabs to compare</p>
+
+  <div class="demo-tabs">
+    <button class="demo-tab active" onclick="showDemo(0)" data-rating="red"><span data-i18n="demo_tab_high">High Risk</span> — example1.com</button>
+    <button class="demo-tab" onclick="showDemo(1)" data-rating="yellow"><span data-i18n="demo_tab_mid">Medium Risk</span> — example2.com</button>
+    <button class="demo-tab" onclick="showDemo(2)" data-rating="green"><span data-i18n="demo_tab_low">Low Risk</span> — example3.com</button>
+  </div>
+
+  <div id="demo-cards"></div>
+  <p class="demo-note" data-i18n="demo_note">Domain names redacted. Data from actual audits run with api-relay-audit.</p>
+</section>
+
+<!-- ── How It Works ── -->
+<section class="container">
+  <h2 style="font-size:1.4rem;font-weight:700;text-align:center" data-i18n="how_title">What Does It Detect?</h2>
+  <p style="text-align:center;color:var(--text2);font-size:.9rem;margin-bottom:8px" data-i18n="how_sub">Threat taxonomy based on Liu et al., "Your Agent Is Mine" (arXiv:2604.08407)</p>
+  <div class="steps">
+    <div class="step">
+      <div class="step-num" data-i18n="step_infra_label">Step 1-2</div>
+      <h3 data-i18n="step_infra_title">Infrastructure Recon</h3>
+      <p data-i18n="step_infra_desc">DNS, CDN, SSL certificate, management panel fingerprint, model list enumeration — understand what's behind the relay.</p>
+    </div>
+    <div class="step">
+      <div class="step-num" data-i18n="step_inject_label">Step 3</div>
+      <h3 data-i18n="step_inject_title">Token Injection (AC-1)</h3>
+      <p data-i18n="step_inject_desc">Compares actual token usage against expected values. Hidden system prompt injection adds extra tokens — the delta reveals it.</p>
+    </div>
+    <div class="step">
+      <div class="step-num" data-i18n="step_extract_label">Step 4 &amp; 6</div>
+      <h3 data-i18n="step_extract_title">Prompt Extraction</h3>
+      <p data-i18n="step_extract_desc">3 attack vectors attempt to extract hidden system prompts: verbatim recall, translation trick, JSON continuation. Plus jailbreak resistance tests.</p>
+    </div>
+    <div class="step">
+      <div class="step-num" data-i18n="step_id_label">Step 5</div>
+      <h3 data-i18n="step_id_title">Identity Substitution</h3>
+      <p data-i18n="step_id_desc">24 keywords detect if "Claude" is actually GPT, DeepSeek, GLM, Qwen, or other models in disguise. Anchor phrases confirm true identity.</p>
+    </div>
+    <div class="step">
+      <div class="step-num" data-i18n="step_ctx_label">Step 7</div>
+      <h3 data-i18n="step_ctx_title">Context Truncation</h3>
+      <p data-i18n="step_ctx_desc">5 canary markers + binary search pinpoint the real context window boundary. Is your 200K context really 200K?</p>
+    </div>
+    <div class="step">
+      <div class="step-num" data-i18n="step_tool_label">Step 8 (AC-1.a)</div>
+      <h3 data-i18n="step_tool_title">Tool-Call Rewriting</h3>
+      <p data-i18n="step_tool_desc">Checks if the relay silently modifies package install commands in responses — typosquatting supply-chain attacks at the proxy layer.</p>
+    </div>
+    <div class="step">
+      <div class="step-num" data-i18n="step_err_label">Step 9 (AC-2)</div>
+      <h3 data-i18n="step_err_title">Error Response Leakage</h3>
+      <p data-i18n="step_err_desc">7 deliberately broken requests probe for API key, env vars, file paths, and LiteLLM internals leaking in error responses.</p>
+    </div>
+    <div class="step">
+      <div class="step-num" data-i18n="step_sse_label">Step 10-11</div>
+      <h3 data-i18n="step_sse_title">Stream Integrity &amp; Web3</h3>
+      <p data-i18n="step_sse_desc">SSE event whitelist, usage monotonicity, thinking signature validity, model identity check. Plus Web3 signature-isolation probes (profile-gated).</p>
+    </div>
+  </div>
+</section>
+
+<!-- ── Comparison ── -->
+<section class="compare-section container" id="compare">
+  <h2 data-i18n="cmp_title">How We Compare</h2>
+  <p class="compare-sub" data-i18n="cmp_sub">Three tools, three approaches — pick the right one for your needs</p>
+  <div style="overflow-x:auto">
+  <table class="compare-table">
+    <thead>
+      <tr>
+        <th data-i18n="cmp_col_dim">Dimension</th>
+        <th class="ours">api-relay-audit</th>
+        <th>hvoy.ai</th>
+        <th>cctest.ai</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td data-i18n="cmp_inject">Token Injection</td><td class="check">&#10003;</td><td class="cross">&#10005;</td><td class="check">&#10003;</td></tr>
+      <tr><td data-i18n="cmp_prompt">Prompt Extraction</td><td class="check">&#10003;</td><td class="cross">&#10005;</td><td class="cross">&#10005;</td></tr>
+      <tr><td data-i18n="cmp_identity">Identity Substitution</td><td class="check">&#10003;</td><td class="check">&#10003;</td><td class="cross">&#10005;</td></tr>
+      <tr><td data-i18n="cmp_jailbreak">Jailbreak Resistance</td><td class="check">&#10003;</td><td class="cross">&#10005;</td><td class="cross">&#10005;</td></tr>
+      <tr><td data-i18n="cmp_context">Context Truncation</td><td class="check">&#10003;</td><td class="cross">&#10005;</td><td class="cross">&#10005;</td></tr>
+      <tr><td data-i18n="cmp_tool">Tool-Call Rewriting (AC-1.a)</td><td class="check">&#10003;</td><td class="cross">&#10005;</td><td class="cross">&#10005;</td></tr>
+      <tr><td data-i18n="cmp_error">Error Response Leakage (AC-2)</td><td class="check">&#10003;</td><td class="cross">&#10005;</td><td class="cross">&#10005;</td></tr>
+      <tr><td data-i18n="cmp_stream">Stream Integrity (SSE)</td><td class="check">&#10003;</td><td class="check">&#10003;</td><td class="cross">&#10005;</td></tr>
+      <tr><td data-i18n="cmp_web3">Web3 Injection</td><td class="check">&#10003;</td><td class="cross">&#10005;</td><td class="cross">&#10005;</td></tr>
+      <tr><td data-i18n="cmp_channel">Channel Fingerprint</td><td class="soon">Soon</td><td class="cross">&#10005;</td><td class="check">&#10003;</td></tr>
+      <tr><td data-i18n="cmp_local">Local Execution (Key stays local)</td><td class="check">&#10003;</td><td class="cross">&#10005;</td><td class="cross">&#10005;</td></tr>
+      <tr><td data-i18n="cmp_oss">Fully Open Source</td><td class="check">&#10003;</td><td class="cross">Partial</td><td class="cross">&#10005;</td></tr>
+      <tr><td data-i18n="cmp_leaderboard">Public Leaderboard</td><td class="cross">&#10005;</td><td class="check">&#10003;</td><td class="cross">&#10005;</td></tr>
+      <tr><td data-i18n="cmp_report">Structured Audit Report</td><td class="check">&#10003;</td><td class="cross">&#10005;</td><td class="cross">&#10005;</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<!-- ── FAQ ── -->
+<section class="faq-section container" id="faq">
+  <h2 data-i18n="faq_title">FAQ</h2>
+
+  <div class="faq-item">
+    <div class="faq-q" onclick="toggleFaq(this)" data-i18n="faq_q1">What is an API relay / proxy?</div>
+    <div class="faq-a" data-i18n="faq_a1">An API relay (also called "中转站" in Chinese) is a third-party service that sits between you and an AI provider like Anthropic or OpenAI. You send your requests to the relay, and it forwards them to the upstream provider. Relays exist because some users can't access AI APIs directly (geo restrictions, payment issues), or because relays offer cheaper per-token pricing by pooling API keys. The problem: a malicious relay can inject hidden instructions, swap the model, truncate your context, or even steal your credentials from error responses.</div>
+  </div>
+  <div class="faq-item">
+    <div class="faq-q" onclick="toggleFaq(this)" data-i18n="faq_q2">Is it safe to enter my API Key?</div>
+    <div class="faq-a" data-i18n="faq_a2">api-relay-audit runs entirely on your machine. Your API Key is only sent to the relay URL you specify — the same relay you're already using. No data is sent to us, no telemetry, no analytics. The standalone version is a single Python file with zero dependencies (just stdlib + curl) — you can read every line of code before running it. This is fundamentally different from web-based tools that ask you to enter your key into a webpage.</div>
+  </div>
+  <div class="faq-item">
+    <div class="faq-q" onclick="toggleFaq(this)" data-i18n="faq_q3">What's the difference between this and hvoy.ai / cctest.ai?</div>
+    <div class="faq-a" data-i18n="faq_a3">Three tools, three approaches. <strong>hvoy.ai</strong> excels at information aggregation — its public leaderboard of 40+ relays is the fastest way to check a relay's reputation. <strong>cctest.ai</strong> offers one-click convenience and a unique channel fingerprint (protobuf signature parsing). <strong>api-relay-audit</strong> covers 11 audit dimensions (vs ~5 for hvoy, ~2 for cctest), runs locally, and is fully open-source. Only api-relay-audit detects tool-call rewriting (AC-1.a), error response credential leakage (AC-2), context truncation, and Web3 injection. Pick based on your needs: quick lookup → hvoy; one-click check → cctest; full security audit → api-relay-audit. <a href="https://github.com/toby-bridges/api-relay-audit/blob/master/docs/comparison-api-relay-audit-vs-hvoy-vs-cctest.md" target="_blank" rel="noopener noreferrer">Full comparison →</a></div>
+  </div>
+  <div class="faq-item">
+    <div class="faq-q" onclick="toggleFaq(this)" data-i18n="faq_q4">What does "token injection" mean?</div>
+    <div class="faq-a" data-i18n="faq_a4">When you send a message to an AI API, the relay may secretly prepend a hidden system prompt. This injects extra tokens into your request — for example, 3200 tokens of instructions telling the model to behave as "Kiro" instead of Claude. You pay for these hidden tokens, and worse, they can override your own instructions. api-relay-audit detects this by comparing actual token counts against expected values: if you sent 100 tokens but the model reports using 3300, there are ~3200 tokens of injection. Similar to the "掺水率" (dilution rate) concept from hvoy.ai, but measured as an absolute token delta for precision.</div>
+  </div>
+  <div class="faq-item">
+    <div class="faq-q" onclick="toggleFaq(this)" data-i18n="faq_q5">What is AC-1.a tool-call rewriting?</div>
+    <div class="faq-a" data-i18n="faq_a5">AC-1.a (from the threat taxonomy in arXiv:2604.08407) is a supply-chain attack where the relay modifies package names in the model's response. For example, the model says <code>pip install requests==2.31.0</code>, but the relay changes it to a typosquatted package. If you're using Claude Code or an AI coding agent that automatically installs packages, this is a real attack vector. api-relay-audit sends pinned package-install commands and compares received text character-by-character to detect any modification.</div>
+  </div>
+  <div class="faq-item">
+    <div class="faq-q" onclick="toggleFaq(this)" data-i18n="faq_q6">What does "inconclusive" mean in the tri-state verdict?</div>
+    <div class="faq-a" data-i18n="faq_a6">Every audit step returns one of three states: <strong>clean</strong> (no anomaly detected), <strong>anomaly</strong> (issue confirmed), or <strong>inconclusive</strong> (the test couldn't determine a result — e.g., the relay blocked the probe or returned an error). This is important because "couldn't test" and "confirmed safe" are very different things. A relay that blocks all probes gets "inconclusive," not "clean." Numeric scoring systems (0-100) blur this distinction — a blocked test might score 50, which looks like "okay" when it should mean "suspicious."</div>
+  </div>
+  <div class="faq-item">
+    <div class="faq-q" onclick="toggleFaq(this)" data-i18n="faq_q7">Does this work with non-Claude models?</div>
+    <div class="faq-a" data-i18n="faq_a7">Most steps (1-9) work with any model through any relay. Step 10 (stream integrity) is Anthropic-specific because it validates Anthropic's SSE event schema, usage fields, and thinking signatures. Step 11 (Web3 injection) is model-agnostic but profile-gated. If your relay uses OpenAI format, the tool auto-detects and adapts the request format. Stream integrity will return "inconclusive" for non-Anthropic formats.</div>
+  </div>
+</section>
+
+<footer>
+  <p>
+    <a href="https://github.com/toby-bridges/api-relay-audit" target="_blank" rel="noopener noreferrer">GitHub</a> &nbsp;·&nbsp;
+    <a href="https://x.com/li9292" target="_blank" rel="noopener noreferrer">X @li9292</a> &nbsp;·&nbsp;
+    MIT License &nbsp;·&nbsp;
+    <span data-i18n="footer_threat">Threat model: </span><a href="https://arxiv.org/abs/2604.08407" target="_blank" rel="noopener noreferrer">arXiv:2604.08407</a>
+  </p>
+</footer>
+
 <script>
-const ratingColors={red:'danger',yellow:'warn',green:'ok',gray:''};
+// ── Demo Data ──
+const demos = [
+  {
+    domain:"example1.com", rating:"red", ratingLabel:"HIGH RISK",
+    ratingLabel_zh:"高风险", ratingLabel_ja:"高リスク", ratingLabel_ko:"고위험",
+    testDate:"2026-02-25",
+    infra:{cdn:"Unknown",system:"Unknown",ssl:"Unknown"},
+    tokenInjection:{delta:3200,verdict:"Severe injection",verdict_zh:"严重注入",verdict_ja:"深刻な注入",verdict_ko:"심각한 주입"},
+    promptExtraction:{leaked:0,total:0},
+    toolSub:{detected:false,probes:0},
+    errorLeak:{severity:"none"},
+    contextLength:{maxTokens:"N/A"},
+    redFlags:["Injected 3200 tokens of Kiro identity","2-layer proxy architecture","Severe request tampering"],
+    redFlags_zh:["注入 3200 tokens Kiro 身份信息","2 层代理架构","严重篡改用户请求"],
+    summary:"Injects 3200 tokens of Kiro identity prompt, routed through 2 proxy layers. Severe request tampering risk.",
+    summary_zh:"注入 3200 tokens 的 Kiro 身份 prompt，经过 2 层代理转发，对用户请求有严重篡改风险。"
+  },
+  {
+    domain:"example2.com", rating:"yellow", ratingLabel:"MEDIUM RISK",
+    ratingLabel_zh:"低中风险", ratingLabel_ja:"中リスク", ratingLabel_ko:"중간위험",
+    testDate:"2026-02-26",
+    infra:{cdn:"Alibaba Cloud ESA (HK)",system:"New API v0.10.9",ssl:"Let's Encrypt"},
+    tokenInjection:{delta:80,verdict:"Injection (Claude Code CLI identity)",verdict_zh:"有注入（Claude Code CLI 身份）",verdict_ja:"注入あり",verdict_ko:"주입 감지"},
+    promptExtraction:{leaked:2,total:6,methods:["Translation","JSON continuation"]},
+    toolSub:{detected:false,probes:5},
+    errorLeak:{severity:"none"},
+    contextLength:{maxTokens:"~200K"},
+    redFlags:["Hidden system prompt ~80 tokens","Multi-domain shared cert","Custom system prompt causes 422 conflict"],
+    redFlags_zh:["隐藏 system prompt 注入 ~80 tokens","多域名共享证书","自定义 system prompt 导致 422 冲突"],
+    summary:"Injects ~80 tokens of Claude Code CLI identity. Translation and JSON continuation methods can extract prompt. Context ~200K tokens intact.",
+    summary_zh:"注入约 80 tokens 的 Claude Code CLI 身份指令。翻译法和 JSON 接龙法可提取 prompt。上下文 ~200K tokens 完整。",
+    tests:[
+      {step:"Token Injection",result:"warn",detail:"+80 tokens"},
+      {step:"Prompt Extraction",result:"warn",detail:"2/6 extracted"},
+      {step:"Identity",result:"fail",detail:"422 error"},
+      {step:"Context Length",result:"pass",detail:"~200K OK"},
+      {step:"Tool-Call (AC-1.a)",result:"pass",detail:"5/5 intact"},
+      {step:"Error Leakage (AC-2)",result:"pass",detail:"Clean"},
+    ]
+  },
+  {
+    domain:"example3.com", rating:"green", ratingLabel:"LOW RISK",
+    ratingLabel_zh:"低风险", ratingLabel_ja:"低リスク", ratingLabel_ko:"저위험",
+    testDate:"2026-02-26",
+    infra:{cdn:"Cloudflare (AMS)",system:"New API (self-hosted)",ssl:"Google Trust Services"},
+    tokenInjection:{delta:25,verdict:"Minor (likely system default)",verdict_zh:"轻微注入（疑似系统默认）",verdict_ja:"軽微（システムデフォルトの可能性）",verdict_ko:"경미(시스템 기본값 추정)"},
+    promptExtraction:{leaked:1,total:6,methods:["Verbatim recall"]},
+    toolSub:{detected:false,probes:5},
+    errorLeak:{severity:"none"},
+    contextLength:{maxTokens:"~197K"},
+    redFlags:["Minor ~25 tokens (likely New API default behavior)"],
+    redFlags_zh:["轻微注入 ~25 tokens（疑似 New API 系统默认行为）"],
+    summary:"Self-hosted relay, minor ~25 token injection (likely New API default). Cat-test and identity test passed. Context ~197K tokens intact. Overall safe and reliable.",
+    summary_zh:"自建中转站，轻微注入约 25 tokens（可能是 New API 默认行为）。猫叫和身份测试通过，上下文 ~197K tokens 完整。整体安全可靠。",
+    tests:[
+      {step:"Token Injection",result:"pass",detail:"+25 (default)"},
+      {step:"Prompt Extraction",result:"pass",detail:"1/6 (minor)"},
+      {step:"Identity",result:"pass",detail:"Claude by Anthropic"},
+      {step:"Context Length",result:"pass",detail:"~197K OK"},
+      {step:"Tool-Call (AC-1.a)",result:"pass",detail:"5/5 intact"},
+      {step:"Error Leakage (AC-2)",result:"pass",detail:"Clean"},
+    ]
+  }
+];
+
 function esc(s){return s==null?'—':String(s).replace(/</g,'&lt;').replace(/>/g,'&gt;')}
-function renderRanking(data){
-  const safe = data.filter(d=>d.rating==='green').map(d=>d.domain);
-  const warn = data.filter(d=>d.rating==='yellow').map(d=>d.domain);
-  const danger = data.filter(d=>d.rating==='red').map(d=>d.domain);
-  const el = document.getElementById('ranking');
-  el.innerHTML = `<h2>🏆 安全排行</h2><div class="ranking-list">
-    ${safe.map(d=>`<span class="ranking-item safe">🟢 ${esc(d)}</span>`).join('')}
-    ${warn.map(d=>`<span class="ranking-item warn">🟡 ${esc(d)}</span>`).join('')}
-    ${danger.map(d=>`<span class="ranking-item danger">🔴 ${esc(d)}</span>`).join('')}
-  </div>`;
-}
-function renderCards(data){
-  const g=document.getElementById('cards');
-  g.innerHTML=data.map((d,i)=>`
-    <div class="card ${d.rating}" onclick="showDetail(${i})">
-      <div class="card-head">
-        <div style="flex:1">
-          <div class="domain">${esc(d.domain)}</div>
-          <div class="api-format">API: ${esc(d.apiFormat||'Anthropic')}</div>
-        </div>
-        <span class="badge ${d.rating}">${esc(d.ratingLabel)}</span>
-      </div>
-      <div class="card-meta">
-        <span>📅 ${esc(d.testDate)}</span>
-        <span>🏗️ ${esc(d.infra.system)}</span>
-        ${d.models?`<span>🤖 ${d.models} 模型</span>`:''}
-      </div>
-      <div class="metrics">
-        <div class="metric">
-          <div class="metric-label">Token 注入</div>
-          <div class="metric-value ${d.tokenInjection.delta>500?'danger':d.tokenInjection.delta>0?'warn':'ok'}">
-            ${d.tokenInjection.delta>0?'+'+d.tokenInjection.delta+' tokens':'无注入'}
-          </div>
-        </div>
-        <div class="metric">
-          <div class="metric-label">Prompt 泄露</div>
-          <div class="metric-value ${d.promptExtraction.leaked>0?'warn':'ok'}">
-            ${d.promptExtraction.leaked}/${d.promptExtraction.total} 提取成功
-          </div>
-        </div>
-        <div class="metric">
-          <div class="metric-label">上下文长度</div>
-          <div class="metric-value">${esc(d.contextLength.maxTokens)}</div>
-        </div>
-        <div class="metric">
-          <div class="metric-label">风险项</div>
-          <div class="metric-value ${d.redFlags.length>2?'danger':d.redFlags.length>0?'warn':'ok'}">${d.redFlags.length} 项</div>
-        </div>
-      </div>
-      <div class="expand-hint">点击查看详细报告 →</div>
-    </div>`).join('');
-}
-function showDetail(i){
-  const d=window._data[i],el=document.getElementById('detail');
-  el.className='detail active';
-  
-  // Prompt 测试详情表格
-  const promptTestsHtml = (d.promptTests && d.promptTests.length) ? `
-    <div class="section">
-      <h3>🎯 Prompt 提取测试详情</h3>
-      <table class="test-table">
-        <tr><th>方法</th><th>结果</th><th>回复摘要</th></tr>
-        ${d.promptTests.map(t=>`<tr>
-          <td>${esc(t.method)}</td>
-          <td class="${t.leaked?'fail':'pass'}">${t.leaked?'🔴 泄露':'🟢 安全'}</td>
-          <td style="font-size:.8rem;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.summary.substring(0,80))}</td>
+
+function renderDemo(i){
+  const d=demos[i];
+  const lang=currentLang;
+  const rl = d['ratingLabel_'+lang]||d.ratingLabel;
+  const vd = d.tokenInjection['verdict_'+lang]||d.tokenInjection.verdict;
+  const sm = d['summary_'+lang]||d.summary;
+  const rf = d['redFlags_'+lang]||d.redFlags;
+
+  const testsHtml = d.tests ? `
+    <div class="demo-detail">
+      <table class="demo-table">
+        <tr><th>${t('demo_th_step')}</th><th>${t('demo_th_result')}</th><th>${t('demo_th_detail')}</th></tr>
+        ${d.tests.map(t=>`<tr>
+          <td>${esc(t.step)}</td>
+          <td class="${t.result==='pass'?'pass':t.result==='warn'?'warn-text':'fail'}">${t.result==='pass'?'&#10003; Clean':t.result==='warn'?'&#9888; Warning':'&#10005; Issue'}</td>
+          <td>${esc(t.detail)}</td>
         </tr>`).join('')}
       </table>
     </div>` : '';
-  
-  // 越狱测试详情表格
-  const jailbreakTestsHtml = (d.jailbreakTests && d.jailbreakTests.length) ? `
-    <div class="section">
-      <h3>🔓 越狱测试详情</h3>
-      <table class="test-table">
-        <tr><th>方法</th><th>结果</th><th>回复摘要</th></tr>
-        ${d.jailbreakTests.map(t=>`<tr>
-          <td>${esc(t.method)}</td>
-          <td class="${t.leaked?'warn-text':'pass'}">${t.leaked?'🟡 有泄漏':'🟢 安全'}</td>
-          <td style="font-size:.8rem;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.summary.substring(0,80))}</td>
-        </tr>`).join('')}
-      </table>
-    </div>` : '';
-  
-  // 上下文测试详情表格
-  const contextTestsHtml = (d.contextTests && d.contextTests.length) ? `
-    <div class="section">
-      <h3>📊 上下文长度测试详情</h3>
-      <table class="test-table">
-        <tr><th>大小</th><th>Tokens</th><th>召回率</th><th>状态</th></tr>
-        ${d.contextTests.map(t=>`<tr>
-          <td>${esc(t.chars)}K 字符</td>
-          <td>${esc(t.tokens)}</td>
-          <td>${esc(t.recall)}</td>
-          <td>${t.status}</td>
-        </tr>`).join('')}
-      </table>
-    </div>` : '';
-  
-  // 指令冲突测试（猫叫/身份）
-  const catIcon = d.instructionConflict.catTest.includes('通过') || d.instructionConflict.catTest.includes('只回') ? '✅' : 
-                   d.instructionConflict.catTest.includes('失败') || d.instructionConflict.catTest.includes('ERROR') ? '❌' : '—';
-  const idIcon = d.instructionConflict.identityTest.includes('通过') || d.instructionConflict.identityTest.includes('Anthropic') ? '✅' : 
-                  d.instructionConflict.identityTest.includes('不明确') || d.instructionConflict.identityTest.includes('ERROR') ? '❌' : '—';
-  
-  el.innerHTML=`
-    <div class="detail-header">
-      <div>
-        <h2>${esc(d.ratingLabel)} ${esc(d.domain)}</h2>
-        <div class="test-time">测试时间：${esc(d.testDate)}</div>
+
+  return `
+    <div class="demo-card active" id="demo-${i}">
+      <div class="demo-bar ${d.rating}"></div>
+      <div class="demo-head">
+        <div>
+          <div class="demo-domain">${esc(d.domain)}</div>
+          <div style="color:var(--text3);font-size:.8rem;margin-top:4px">${esc(d.infra.system)}</div>
+        </div>
+        <span class="demo-badge ${d.rating}">${esc(rl)}</span>
       </div>
-      <button class="close-btn" onclick="closeDetail()">✕ 关闭</button>
-    </div>
-    <div class="section">
-      <h3>📋 概要</h3>
-      <div class="summary-text">${esc(d.summary)}</div>
-    </div>
-    <div class="section">
-      <h3>🏗️ 基础设施</h3>
-      <div class="info-grid">
-        <div class="info-item"><div class="label">CDN</div><div class="value">${esc(d.infra.cdn)}</div></div>
-        <div class="info-item"><div class="label">系统</div><div class="value">${esc(d.infra.system)}</div></div>
-        <div class="info-item"><div class="label">SSL</div><div class="value">${esc(d.infra.ssl)}</div></div>
-        <div class="info-item"><div class="label">API 格式</div><div class="value">${esc(d.apiFormat||'Anthropic')}</div></div>
-        <div class="info-item"><div class="label">API 地址</div><div class="value" style="font-family:monospace;font-size:.8rem">${esc(d.url)}</div></div>
+      <div class="demo-meta">
+        <span>${t('demo_date')}: ${esc(d.testDate)}</span>
+        <span>CDN: ${esc(d.infra.cdn)}</span>
+        <span>SSL: ${esc(d.infra.ssl)}</span>
       </div>
-    </div>
-    <div class="section">
-      <h3>🔍 检测结果</h3>
-      <table class="test-table">
-        <tr><th>检测项</th><th>结果</th><th>详情</th></tr>
-        <tr>
-          <td>Token 注入</td>
-          <td class="${d.tokenInjection.delta>500?'fail':d.tokenInjection.delta>0?'warn-text':'pass'}">${esc(d.tokenInjection.verdict)}</td>
-          <td>${d.tokenInjection.delta>0?'差额 +'+d.tokenInjection.delta+' tokens':'—'}</td>
-        </tr>
-        <tr>
-          <td>Prompt 提取</td>
-          <td class="${d.promptExtraction.leaked>0?'warn-text':'pass'}">${d.promptExtraction.leaked}/${d.promptExtraction.total} 成功</td>
-          <td>${d.promptExtraction.methods.length?d.promptExtraction.methods.join('、'):'—'}</td>
-        </tr>
-        <tr>
-          <td>猫叫测试</td>
-          <td>${catIcon}</td>
-          <td>${esc(d.instructionConflict.catTest)}</td>
-        </tr>
-        <tr>
-          <td>身份覆盖</td>
-          <td>${idIcon}</td>
-          <td>${esc(d.instructionConflict.identityTest)}</td>
-        </tr>
-        <tr>
-          <td>上下文长度</td>
-          <td class="pass">${esc(d.contextLength.verdict)}</td>
-          <td>最大 ${esc(d.contextLength.maxChars)} 字符 / ${esc(d.contextLength.maxTokens)} tokens</td>
-        </tr>
-        ${d.toolSubstitution ? `<tr>
-          <td>工具调用改写 (AC-1.a)</td>
-          <td class="${d.toolSubstitution.detected?'fail':'pass'}">${d.toolSubstitution.detected?'🔴 改写':'🟢 完整'}</td>
-          <td>${d.toolSubstitution.probes && d.toolSubstitution.probes.length ? d.toolSubstitution.probes.length+' 个包管理器探测' : '—'}</td>
-        </tr>` : ''}
-        ${d.errorLeakage ? `<tr>
-          <td>错误响应泄漏 (AC-2)</td>
-          <td class="${d.errorLeakage.severity==='critical'||d.errorLeakage.severity==='high'?'fail':d.errorLeakage.severity==='medium'?'warn-text':'pass'}">${d.errorLeakage.severity==='critical'?'🔴 凭证回显':d.errorLeakage.severity==='high'?'🔴 部分泄漏':d.errorLeakage.severity==='medium'?'🟡 信息泄漏':d.errorLeakage.severity==='inconclusive'?'🟡 无法判定':'🟢 清洁'}</td>
-          <td>${d.errorLeakage.triggers && d.errorLeakage.triggers.length ? d.errorLeakage.triggers.length+' 个触发器' : '—'}</td>
-        </tr>` : ''}
-      </table>
-    </div>
-    ${d.toolSubstitution && d.toolSubstitution.probes && d.toolSubstitution.probes.length ? `
-    <div class="section">
-      <h3>📦 工具调用改写探测 (AC-1.a)</h3>
-      <table class="test-table">
-        <tr><th>包管理器</th><th>预期</th><th>实际</th><th>判定</th></tr>
-        ${d.toolSubstitution.probes.map(p=>`<tr>
-          <td>${esc(p.manager)}</td>
-          <td style="font-family:monospace;font-size:.8rem">${esc(p.expected)}</td>
-          <td style="font-family:monospace;font-size:.8rem;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.received)}</td>
-          <td class="${p.verdict==='substituted'?'fail':p.verdict==='whitespace'?'warn-text':'pass'}">${p.verdict==='substituted'?'🔴 改写':p.verdict==='whitespace'?'🟡 噪声':p.verdict==='error'?'⚪ 跳过':'🟢 完整'}</td>
-        </tr>`).join('')}
-      </table>
-    </div>` : ''}
-    ${d.errorLeakage && d.errorLeakage.triggers && d.errorLeakage.triggers.length ? `
-    <div class="section">
-      <h3>🔓 错误响应泄漏探测 (AC-2 adjacent, Step 9)</h3>
-      <table class="test-table">
-        <tr><th>触发器</th><th>HTTP 状态</th><th>严重度</th><th>泄漏内容</th></tr>
-        ${d.errorLeakage.triggers.map(t=>`<tr>
-          <td>${esc(t.trigger)}</td>
-          <td>${esc(t.status)}</td>
-          <td class="${t.severity==='critical'||t.severity==='high'?'fail':t.severity==='medium'?'warn-text':'pass'}">${t.severity==='critical'?'🔴 CRITICAL':t.severity==='high'?'🔴 HIGH':t.severity==='medium'?'🟡 MEDIUM':'🟢 none'}</td>
-          <td style="font-size:.8rem;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.leaks)}</td>
-        </tr>`).join('')}
-      </table>
-    </div>` : ''}
-    ${promptTestsHtml}
-    ${jailbreakTestsHtml}
-    ${contextTestsHtml}
-    ${d.redFlags.length?`<div class="section">
-      <h3>🚩 风险标记</h3>
-      <div class="flags">${d.redFlags.map(f=>`<span class="flag">${esc(f)}</span>`).join('')}</div>
-    </div>`:''}`;
-  el.scrollIntoView({behavior:'smooth',block:'start'});
+      <div class="demo-grid">
+        <div class="demo-metric">
+          <div class="demo-metric-label">Token Injection</div>
+          <div class="demo-metric-value ${d.tokenInjection.delta>500?'danger':d.tokenInjection.delta>50?'warn':'ok'}">${d.tokenInjection.delta>0?'+'+d.tokenInjection.delta+' tokens':t('demo_no_inject')}</div>
+          <div style="color:var(--text3);font-size:.72rem;margin-top:4px">${esc(vd)}</div>
+        </div>
+        <div class="demo-metric">
+          <div class="demo-metric-label">Prompt Extraction</div>
+          <div class="demo-metric-value ${d.promptExtraction.leaked>1?'warn':d.promptExtraction.leaked>0?'warn':'ok'}">${d.promptExtraction.leaked}/${d.promptExtraction.total} ${t('demo_extracted')}</div>
+        </div>
+        <div class="demo-metric">
+          <div class="demo-metric-label">Context Length</div>
+          <div class="demo-metric-value ok">${esc(d.contextLength.maxTokens)}</div>
+        </div>
+        <div class="demo-metric">
+          <div class="demo-metric-label">${t('demo_risk_items')}</div>
+          <div class="demo-metric-value ${rf.length>2?'danger':rf.length>0?'warn':'ok'}">${rf.length}</div>
+        </div>
+      </div>
+      ${testsHtml}
+      <div class="demo-detail">
+        <div style="color:var(--text2);font-size:.85rem;line-height:1.7;background:rgba(255,255,255,.02);padding:14px 16px;border-radius:8px;border-left:3px solid var(--accent)">${esc(sm)}</div>
+      </div>
+      ${rf.length?`<div class="demo-flags">${rf.map(f=>`<span class="flag">${esc(f)}</span>`).join('')}</div>`:''}
+    </div>`;
 }
-function closeDetail(){document.getElementById('detail').className='detail'}
-fetch('data.json').then(r=>r.json()).then(data=>{
-  data.sort((a,b)=>{const o={red:0,yellow:1,gray:2,green:3};return (o[a.rating]??9)-(o[b.rating]??9)});
-  window._data=data;
-  renderRanking(data);
-  renderCards(data);
+
+let currentDemo=0;
+function showDemo(i){
+  currentDemo=i;
+  document.querySelectorAll('.demo-tab').forEach((t,j)=>t.classList.toggle('active',j===i));
+  document.getElementById('demo-cards').innerHTML=renderDemo(i);
+}
+
+// ── Audit Tab Switching ──
+function switchAuditTab(tab){
+  document.querySelectorAll('.audit-tab').forEach((b,i)=>b.classList.toggle('active',i===(tab==='human'?0:1)));
+  document.getElementById('tab-human').classList.toggle('active',tab==='human');
+  document.getElementById('tab-agent').classList.toggle('active',tab==='agent');
+}
+function copyAgentCmd(btn){
+  const block=btn.parentElement;
+  const text=block.innerText.replace(t('copy_btn'),'').replace(t('copied_btn'),'').trim();
+  navigator.clipboard.writeText(text).then(()=>{
+    btn.textContent=t('copied_btn');
+    setTimeout(()=>btn.textContent=t('copy_btn'),1500);
+  });
+}
+
+// ── Terminal Animation ──
+function playTerminalDemo(userUrl){
+  const el=document.getElementById('term-demo');
+  const body=document.getElementById('term-body');
+  el.classList.add('visible');
+  body.innerHTML='';
+  const domain=userUrl.replace(/^https?:\/\//,'').replace(/\/.*$/,'');
+  const lines=[
+    {text:'$ curl -sO https://raw.githubusercontent.com/.../audit.py',cls:'prompt',delay:0},
+    {text:t('term_downloading'),cls:'out',delay:600},
+    {text:'$ python3 audit.py --key \'sk-...\' --url \''+esc(domain)+'/v1\'',cls:'prompt',delay:1200},
+    {text:'',cls:'out',delay:1600},
+    {text:t('term_step1'),cls:'highlight',delay:2000},
+    {text:t('term_step1_out'),cls:'out',delay:2600},
+    {text:t('term_step3'),cls:'highlight',delay:3200},
+    {text:t('term_step3_out'),cls:'warn',delay:3800},
+    {text:t('term_step5'),cls:'highlight',delay:4400},
+    {text:t('term_step5_out'),cls:'ok',delay:5000},
+    {text:t('term_step8'),cls:'highlight',delay:5600},
+    {text:t('term_step8_out'),cls:'ok',delay:6200},
+    {text:'...',cls:'out',delay:6600},
+    {text:'',cls:'out',delay:7000},
+    {text:t('term_done').replace('{domain}',domain),cls:'ok',delay:7400},
+    {text:t('term_open_hint'),cls:'out',delay:8000},
+  ];
+  lines.forEach(l=>{
+    setTimeout(()=>{
+      const div=document.createElement('div');
+      div.className='term-line';
+      div.style.animationDelay='0s';
+      if(l.cls==='prompt') div.innerHTML='<span class="prompt">'+l.text+'</span>';
+      else if(l.cls==='highlight') div.innerHTML='<span class="highlight">'+l.text+'</span>';
+      else if(l.cls==='warn') div.innerHTML='<span class="warn">'+l.text+'</span>';
+      else if(l.cls==='ok') div.innerHTML='<span class="ok">'+l.text+'</span>';
+      else div.innerHTML='<span class="out">'+l.text+'</span>';
+      body.appendChild(div);
+      body.scrollTop=body.scrollHeight;
+    },l.delay);
+  });
+}
+
+// ── FAQ Toggle ──
+function toggleFaq(el){
+  el.parentElement.classList.toggle('open');
+}
+
+// ── Form & Command Generator ──
+// Shell-safe escaping: wrap in single quotes, escape inner single quotes
+function shellEscape(s){
+  return "'"+s.replace(/'/g,"'\\''")+"'";
+}
+function isWindows(){
+  return /Win/i.test(navigator.platform||navigator.userAgent);
+}
+function generateCmd(){
+  const url=document.getElementById('f-url').value.trim();
+  const key=document.getElementById('f-key').value.trim();
+  const model=document.getElementById('f-model').value;
+  if(!url){document.getElementById('f-url').focus();return}
+  if(!key){document.getElementById('f-key').focus();return}
+  const win=isWindows();
+  let cmd;
+  if(win){
+    // PowerShell: Invoke-WebRequest, semicolon, single-quote escaping via doubling
+    const psKey=key.replace(/'/g,"''");
+    const psUrl=url.replace(/'/g,"''");
+    cmd=`Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/toby-bridges/api-relay-audit/master/audit.py' -OutFile audit.py; python audit.py --key '${psKey}' --url '${psUrl}' --model ${model}`;
+  } else {
+    cmd=`curl -sO https://raw.githubusercontent.com/toby-bridges/api-relay-audit/master/audit.py && python3 audit.py --key ${shellEscape(key)} --url ${shellEscape(url)} --model ${model}`;
+  }
+  const el=document.getElementById('cmd-output');
+  const copyBtn=el.querySelector('.copy-btn');
+  el.innerHTML='';
+  el.appendChild(copyBtn);
+  const commentSpan=document.createElement('span');
+  commentSpan.className='comment';
+  commentSpan.textContent=(win?'# PowerShell\n':'# ')+ t('cmd_comment');
+  el.appendChild(commentSpan);
+  el.appendChild(document.createElement('br'));
+  el.appendChild(document.createTextNode(cmd));
+  // Show env-var hint for shell history awareness
+  const hintDiv=document.createElement('div');
+  hintDiv.style.cssText='margin-top:10px;font-size:.72rem;color:var(--text3);font-family:inherit';
+  hintDiv.textContent=t('cmd_history_hint');
+  el.appendChild(hintDiv);
+  document.getElementById('gen-cmd').classList.add('visible');
+  document.getElementById('gen-cmd').scrollIntoView({behavior:'smooth',block:'center'});
+  // Trigger terminal animation
+  playTerminalDemo(url);
+}
+
+function copyCmdOutput(){
+  const el=document.getElementById('cmd-output');
+  // Extract only the command line (skip comment and hint)
+  const lines=el.innerText.split('\n').filter(l=>l.trim()&&!l.startsWith('#')&&!l.startsWith(t('cmd_history_hint').substring(0,10)));
+  const text=lines.slice(0,1).join('\n').replace(t('copy_btn'),'').replace(t('copied_btn'),'').trim();
+  navigator.clipboard.writeText(text).then(()=>{
+    const btn=el.querySelector('.copy-btn');
+    btn.textContent=t('copied_btn');
+    setTimeout(()=>btn.textContent=t('copy_btn'),1500);
+  });
+}
+
+// ── i18n ──
+let currentLang='zh';
+const i18n={
+  zh:{
+    nav_demo:"Demo",nav_install:"快速开始",nav_faq:"FAQ",
+    hero_badge:"本地运行 — API Key 不经过任何第三方服务器",
+    hero_title:'<span class="gradient">AI API 中转站</span>安全审计',
+    hero_sub:"开源 11 步审计工具。检测 Token 注入、Prompt 泄露、身份替换、工具调用改写、错误响应凭证回显、SSE 流完整性篡改。",
+    stat_steps:"审计步骤",stat_matrix:"风险矩阵",stat_tests:"单元测试",stat_deps:"依赖项 (standalone)",
+    cta_demo:"查看 Demo 报告",cta_install:"开始审计",
+    demo_title:"审计报告 Demo",
+    demo_sub:"来自真实中转站的审计结果 — 点击标签对比不同风险等级",
+    demo_tab_high:"高风险",demo_tab_mid:"中风险",demo_tab_low:"低风险",
+    demo_note:"域名已脱敏。数据来自 api-relay-audit 的实际审计。",
+    demo_date:"测试日期",demo_no_inject:"无注入",demo_extracted:"提取成功",demo_risk_items:"风险项",
+    demo_th_step:"检测项",demo_th_result:"结果",demo_th_detail:"详情",
+    how_title:"检测什么？",
+    how_sub:'威胁分类基于 Liu et al., "Your Agent Is Mine" (arXiv:2604.08407)',
+    step_infra_label:"Step 1-2",step_infra_title:"基础设施侦察",step_infra_desc:"DNS、CDN、SSL 证书、管理面板指纹、模型列表枚举 — 了解中转站背后的技术栈。",
+    step_inject_label:"Step 3",step_inject_title:"Token 注入 (AC-1)",step_inject_desc:"对比实际 token 用量与预期值。隐藏 system prompt 注入会增加额外 token — 差值揭示注入量。",
+    step_extract_label:"Step 4 & 6",step_extract_title:"Prompt 提取",step_extract_desc:"3 种攻击向量尝试提取隐藏 system prompt：直接复述、翻译法、JSON 接龙。加上越狱防护测试。",
+    step_id_label:"Step 5",step_id_title:"身份替换",step_id_desc:'24 个关键词检测 "Claude" 是否实际是 GPT、DeepSeek、GLM、Qwen 或其他模型。锚点短语确认真实身份。',
+    step_ctx_label:"Step 7",step_ctx_title:"上下文截断",step_ctx_desc:"5 个 canary 标记 + 二分查找精确定位真实上下文窗口边界。你的 200K context 真的有 200K 吗？",
+    step_tool_label:"Step 8 (AC-1.a)",step_tool_title:"工具调用改写",step_tool_desc:"检测中转站是否在返回路径上偷改包安装命令 — 代理层面的拼写投毒供应链攻击。",
+    step_err_label:"Step 9 (AC-2)",step_err_title:"错误响应泄漏",step_err_desc:"7 种故意破坏的请求探测 API Key、环境变量、文件路径、LiteLLM 内部字段是否在错误响应中泄漏。",
+    step_sse_label:"Step 10-11",step_sse_title:"流完整性 & Web3",step_sse_desc:"SSE 事件白名单、usage 单调性、thinking 签名有效性、模型身份检查。加上 Web3 签名隔离探针（profile-gated）。",
+    cmp_title:"横向对比",cmp_sub:"三个工具，三种思路 — 根据需求选择",
+    cmp_col_dim:"维度",
+    cmp_inject:"Token 注入",cmp_prompt:"Prompt 提取",cmp_identity:"身份替换",cmp_jailbreak:"越狱防护",
+    cmp_context:"上下文截断",cmp_tool:"工具调用改写 (AC-1.a)",cmp_error:"错误响应泄漏 (AC-2)",
+    cmp_stream:"流完整性 (SSE)",cmp_web3:"Web3 注入",cmp_channel:"通道指纹",
+    cmp_local:"本地运行 (Key 不外传)",cmp_oss:"完全开源",cmp_leaderboard:"公开排行榜",cmp_report:"结构化审计报告",
+    install_title:"开始审计",install_sub:"填写你的中转站信息 — 我们生成命令，你在本地运行。",
+    flow_title:"你的 Key 如何流转 — 关键区别",
+    flow_you:"你",flow_local:"你的终端",flow_relay:"你的中转站",
+    flow_good:"api-relay-audit: Key 始终在你的机器上",
+    flow_bad:"网页工具: Key 先经过第三方服务器",
+    form_url_label:"API 接口地址",form_url_hint:"你要审计的中转站 base URL",
+    form_key_label:"API Key",form_key_hint:"仅在浏览器内使用，生成下方命令 — 不会发送到任何地方。",
+    form_model_label:"模型",form_generate:"生成审计命令",
+    cmd_step1:"打开终端（macOS: Terminal.app / Windows: PowerShell）",
+    cmd_step2:"粘贴以下命令并回车 — 约 2 分钟完成：",
+    cmd_step3:"完成！Markdown 审计报告会保存在当前目录。",
+    cmd_comment:"下载审计脚本并运行 11 步审计",
+    cmd_history_hint:"Tip: 命令中的 Key 会留在 shell history 中。如需更安全，可改用环境变量: export KEY=sk-... 然后 --key $KEY",
+    tab_human:"手动运行",tab_agent:"Agent 自动运行",
+    agent_pitch:"安装为 Claude Code Skill — 说一句话，agent 替你跑完 11 步审计。",
+    agent_step1_title:"安装 Skill",agent_step1_desc:"在终端运行一次，将审计技能添加到 Claude Code：",
+    agent_step2_title:"一句话触发",agent_step2_desc:"打开 Claude Code，说：",
+    agent_trigger:'\u201c帮我审计这个中转站：https://your-relay.com/v1，key 是 sk-xxx\u201d',
+    agent_step3_title:"Agent 全自动执行",agent_step3_desc:"Claude Code 自动下载脚本、运行 11 步检测、呈现结果 — 你只需要看报告。",
+    agent_security:"同样的安全模型 — agent 在你的本地机器上运行，Key 不经过任何第三方服务器。",
+    term_downloading:"audit.py 已下载 (2,847 行, 零依赖)",
+    term_step1:"[Step 1/11] 基础设施侦察...",
+    term_step1_out:"  CDN: Cloudflare | 系统: New API | SSL: Let's Encrypt",
+    term_step3:"[Step 3/11] Token 注入检测...",
+    term_step3_out:"  ⚠ 检测到注入: +80 tokens (疑似 Claude Code CLI 身份)",
+    term_step5:"[Step 5/11] 身份替换检测...",
+    term_step5_out:"  ✓ 身份确认: Claude by Anthropic",
+    term_step8:"[Step 8/11] 工具调用改写检测 (AC-1.a)...",
+    term_step8_out:"  ✓ 5/5 包管理器探测完整，无改写",
+    term_done:"✓ 审计完成! 报告已保存: audit-{domain}.md",
+    term_open_hint:"用任意文本编辑器打开 .md 文件查看完整报告",
+    copy_btn:"复制",copied_btn:"已复制!",
+    cost_note:"每次审计消耗约 $0.2-0.5 API 费用（由你的 provider 计费）",
+    install_security:"你的 API Key 仅发送到你指定的中转站地址。无遥测、无第三方服务器。",
+    faq_title:"常见问题",
+    faq_q1:"什么是 API 中转站？",
+    faq_a1:'API 中转站是介于你和 AI 提供商（如 Anthropic、OpenAI）之间的第三方服务。你的请求发送到中转站，由它转发给上游。中转站存在的原因：部分用户无法直接访问 AI API（地理限制、支付问题），或者中转站通过共享 API Key 提供更便宜的价格。问题是：恶意中转站可以注入隐藏指令、替换模型、截断上下文、甚至从错误响应中窃取你的凭证。',
+    faq_q2:"输入 API Key 安全吗？",
+    faq_a2:'api-relay-audit 完全在你的机器上运行。你的 API Key 仅发送到你指定的中转站地址 — 也就是你本来就在使用的那个中转站。没有数据发送给我们，没有遥测，没有分析。Standalone 版本是一个单 Python 文件，零依赖（只用 stdlib + curl）— 你可以在运行前阅读每一行代码。这与要求你在网页上输入 Key 的工具有本质区别。',
+    faq_q3:"和 hvoy.ai / cctest.ai 有什么区别？",
+    faq_a3:'三个工具，三种思路。<strong>hvoy.ai</strong> 擅长信息聚合 — 40+ 中转站的公开排行榜是最快的查看方式。<strong>cctest.ai</strong> 提供一键便利和独特的通道指纹（protobuf 签名解析）。<strong>api-relay-audit</strong> 覆盖 11 个审计维度（vs hvoy ~5 个，cctest ~2 个），本地运行，完全开源。只有 api-relay-audit 能检测工具调用改写 (AC-1.a)、错误响应凭证泄漏 (AC-2)、上下文截断和 Web3 注入。按需选择：快速查看 → hvoy；一键检查 → cctest；完整安全审计 → api-relay-audit。<a href="https://github.com/toby-bridges/api-relay-audit/blob/master/docs/comparison-api-relay-audit-vs-hvoy-vs-cctest.md" target="_blank" rel="noopener noreferrer">完整评测 →</a>',
+    faq_q4:"什么是 Token 注入？",
+    faq_a4:'当你向 AI API 发送消息时，中转站可能暗中在前面插入一段隐藏 system prompt。这注入了额外的 token — 例如 3200 tokens 的指令让模型表现为 "Kiro" 而非 Claude。你为这些隐藏 token 付费，更严重的是它们可以覆盖你的指令。api-relay-audit 通过对比实际 token 数与预期值来检测：如果你发送了 100 tokens 但模型报告使用了 3300，说明有 ~3200 tokens 的注入。类似于 hvoy.ai 的 "掺水率" 概念，但以绝对 token 差值衡量，更精确。',
+    faq_q5:"什么是 AC-1.a 工具调用改写？",
+    faq_a5:'AC-1.a（来自 arXiv:2604.08407 的威胁分类）是一种供应链攻击：中转站修改模型回复中的包名。例如模型说 <code>pip install requests==2.31.0</code>，但中转站把它改成一个拼写投毒的包名。如果你使用 Claude Code 或 AI 编码 agent 自动安装包，这是一个真实的攻击向量。api-relay-audit 发送固定版本的包安装命令，逐字符比对返回内容来检测任何修改。',
+    faq_q6:'"inconclusive" 三态判定是什么意思？',
+    faq_a6:'每个审计步骤返回三种状态之一：<strong>clean</strong>（未检测到异常）、<strong>anomaly</strong>（确认问题）、<strong>inconclusive</strong>（无法确定 — 例如中转站拦截了探针或返回错误）。这很重要，因为 "无法测试" 和 "确认安全" 是截然不同的。拦截所有探针的中转站得到 "inconclusive" 而非 "clean"。数字评分系统（0-100）模糊了这个区别 — 一个被拦截的测试可能得 50 分，看起来像 "还行"，但实际应该是 "可疑"。',
+    faq_q7:"支持非 Claude 模型吗？",
+    faq_a7:'大多数步骤 (1-9) 适用于任何模型和中转站。Step 10（流完整性）是 Anthropic 专属的，因为它验证 Anthropic 的 SSE 事件 schema、usage 字段和 thinking 签名。Step 11（Web3 注入）不限模型但需要 profile 开关。如果你的中转站使用 OpenAI 格式，工具会自动检测并适配请求格式。非 Anthropic 格式的流完整性检测会返回 "inconclusive"。',
+    footer_threat:"威胁模型: "
+  },
+  en:{
+    nav_demo:"Demo",nav_install:"Quick Start",nav_faq:"FAQ",
+    hero_badge:"Local execution — your API Key is never sent to a third-party server",
+    hero_title:'<span class="gradient">AI API Relay</span> Security Audit',
+    hero_sub:"Open-source 11-step audit tool. Detects token injection, prompt leakage, identity substitution, tool-call rewriting, credential leakage in error responses, and SSE stream tampering.",
+    stat_steps:"Audit Steps",stat_matrix:"Risk Matrix",stat_tests:"Unit Tests",stat_deps:"Dependencies (standalone)",
+    cta_demo:"See Demo Report",cta_install:"Start Audit",
+    demo_title:"Audit Report Demo",demo_sub:"Real audit results from three relay services — click tabs to compare",
+    demo_tab_high:"High Risk",demo_tab_mid:"Medium Risk",demo_tab_low:"Low Risk",
+    demo_note:"Domain names redacted. Data from actual audits run with api-relay-audit.",
+    demo_date:"Test date",demo_no_inject:"No injection",demo_extracted:"extracted",demo_risk_items:"Risk Items",
+    demo_th_step:"Test",demo_th_result:"Result",demo_th_detail:"Detail",
+    how_title:"What Does It Detect?",
+    how_sub:'Threat taxonomy based on Liu et al., "Your Agent Is Mine" (arXiv:2604.08407)',
+    step_infra_label:"Step 1-2",step_infra_title:"Infrastructure Recon",step_infra_desc:"DNS, CDN, SSL certificate, management panel fingerprint, model list enumeration — understand what's behind the relay.",
+    step_inject_label:"Step 3",step_inject_title:"Token Injection (AC-1)",step_inject_desc:"Compares actual token usage against expected values. Hidden system prompt injection adds extra tokens — the delta reveals it.",
+    step_extract_label:"Step 4 & 6",step_extract_title:"Prompt Extraction",step_extract_desc:"3 attack vectors attempt to extract hidden system prompts: verbatim recall, translation trick, JSON continuation. Plus jailbreak resistance tests.",
+    step_id_label:"Step 5",step_id_title:"Identity Substitution",step_id_desc:'24 keywords detect if "Claude" is actually GPT, DeepSeek, GLM, Qwen, or other models in disguise. Anchor phrases confirm true identity.',
+    step_ctx_label:"Step 7",step_ctx_title:"Context Truncation",step_ctx_desc:"5 canary markers + binary search pinpoint the real context window boundary. Is your 200K context really 200K?",
+    step_tool_label:"Step 8 (AC-1.a)",step_tool_title:"Tool-Call Rewriting",step_tool_desc:"Checks if the relay silently modifies package install commands in responses — typosquatting supply-chain attacks at the proxy layer.",
+    step_err_label:"Step 9 (AC-2)",step_err_title:"Error Response Leakage",step_err_desc:"7 deliberately broken requests probe for API key, env vars, file paths, and LiteLLM internals leaking in error responses.",
+    step_sse_label:"Step 10-11",step_sse_title:"Stream Integrity & Web3",step_sse_desc:"SSE event whitelist, usage monotonicity, thinking signature validity, model identity check. Plus Web3 signature-isolation probes (profile-gated).",
+    cmp_title:"How We Compare",cmp_sub:"Three tools, three approaches — pick the right one for your needs",
+    cmp_col_dim:"Dimension",
+    cmp_inject:"Token Injection",cmp_prompt:"Prompt Extraction",cmp_identity:"Identity Substitution",cmp_jailbreak:"Jailbreak Resistance",
+    cmp_context:"Context Truncation",cmp_tool:"Tool-Call Rewriting (AC-1.a)",cmp_error:"Error Response Leakage (AC-2)",
+    cmp_stream:"Stream Integrity (SSE)",cmp_web3:"Web3 Injection",cmp_channel:"Channel Fingerprint",
+    cmp_local:"Local Execution (Key stays local)",cmp_oss:"Fully Open Source",cmp_leaderboard:"Public Leaderboard",cmp_report:"Structured Audit Report",
+    install_title:"Start Your Audit",install_sub:"Fill in your relay info — we generate the command, you run it locally.",
+    flow_title:"How your Key flows — the critical difference",
+    flow_you:"You",flow_local:"Your Terminal",flow_relay:"Your Relay",
+    flow_good:"api-relay-audit: Key stays on YOUR machine",
+    flow_bad:"Web tools: Key goes to a 3rd-party server first",
+    form_url_label:"API Endpoint URL",form_url_hint:"The base URL of the relay you want to audit",
+    form_key_label:"API Key",form_key_hint:"Stays in your browser. Only used to generate the CLI command below — never sent anywhere.",
+    form_model_label:"Model",form_generate:"Generate Audit Command",
+    cmd_step1:"Open your terminal (macOS: Terminal.app / Windows: PowerShell)",
+    cmd_step2:"Paste this command and press Enter — takes ~2 minutes:",
+    cmd_step3:"Done! A Markdown audit report will be saved to your current directory.",
+    cmd_comment:"Download audit script and run full 11-step audit",
+    cmd_history_hint:"Tip: The Key in this command will persist in shell history. For better hygiene: export KEY=sk-... then use --key $KEY",
+    tab_human:"Run Manually",tab_agent:"Agent Auto-Run",
+    agent_pitch:"Install as a Claude Code Skill — say one sentence, the agent runs the full 11-step audit for you.",
+    agent_step1_title:"Install the Skill",agent_step1_desc:"Run this once in your terminal to add the audit skill to Claude Code:",
+    agent_step2_title:"Trigger with one sentence",agent_step2_desc:"Open Claude Code and say:",
+    agent_trigger:'"Audit this relay: https://your-relay.com/v1, my key is sk-xxx"',
+    agent_step3_title:"Agent does everything",agent_step3_desc:"Claude Code automatically downloads the script, runs all 11 steps, and presents the findings — you just read the result.",
+    agent_security:"Same security model — the agent runs locally on your machine, Key never touches a third-party server.",
+    term_downloading:"audit.py downloaded (2,847 lines, zero dependencies)",
+    term_step1:"[Step 1/11] Infrastructure recon...",
+    term_step1_out:"  CDN: Cloudflare | System: New API | SSL: Let's Encrypt",
+    term_step3:"[Step 3/11] Token injection detection...",
+    term_step3_out:"  ⚠ Injection detected: +80 tokens (Claude Code CLI identity)",
+    term_step5:"[Step 5/11] Identity substitution check...",
+    term_step5_out:"  ✓ Identity confirmed: Claude by Anthropic",
+    term_step8:"[Step 8/11] Tool-call rewriting (AC-1.a)...",
+    term_step8_out:"  ✓ 5/5 package manager probes intact, no rewriting",
+    term_done:"✓ Audit complete! Report saved: audit-{domain}.md",
+    term_open_hint:"Open the .md file with any text editor to view the full report",
+    copy_btn:"Copy",copied_btn:"Copied!",
+    cost_note:"Each audit costs ~$0.2-0.5 in API usage (billed by your provider)",
+    install_security:"Your API Key is only sent to the relay URL you specify. No telemetry, no third-party servers.",
+    faq_title:"FAQ",
+    faq_q1:"What is an API relay / proxy?",
+    faq_a1:'An API relay (also called "中转站" in Chinese) is a third-party service that sits between you and an AI provider like Anthropic or OpenAI. You send your requests to the relay, and it forwards them to the upstream provider. Relays exist because some users can\'t access AI APIs directly (geo restrictions, payment issues), or because relays offer cheaper per-token pricing by pooling API keys. The problem: a malicious relay can inject hidden instructions, swap the model, truncate your context, or even steal your credentials from error responses.',
+    faq_a2:'api-relay-audit runs entirely on your machine. Your API Key is only sent to the relay URL you specify — the same relay you\'re already using. No data is sent to us, no telemetry, no analytics. The standalone version is a single Python file with zero dependencies (just stdlib + curl) — you can read every line of code before running it. This is fundamentally different from web-based tools that ask you to enter your key into a webpage.',
+    faq_q2:"Is it safe to enter my API Key?",
+    faq_q3:"What's the difference between this and hvoy.ai / cctest.ai?",
+    faq_a3:'Three tools, three approaches. <strong>hvoy.ai</strong> excels at information aggregation — its public leaderboard of 40+ relays is the fastest way to check a relay\'s reputation. <strong>cctest.ai</strong> offers one-click convenience and a unique channel fingerprint (protobuf signature parsing). <strong>api-relay-audit</strong> covers 11 audit dimensions (vs ~5 for hvoy, ~2 for cctest), runs locally, and is fully open-source. Only api-relay-audit detects tool-call rewriting (AC-1.a), error response credential leakage (AC-2), context truncation, and Web3 injection. Pick based on your needs: quick lookup → hvoy; one-click check → cctest; full security audit → api-relay-audit. <a href="https://github.com/toby-bridges/api-relay-audit/blob/master/docs/comparison-api-relay-audit-vs-hvoy-vs-cctest.md" target="_blank" rel="noopener noreferrer">Full comparison →</a>',
+    faq_q4:'What does "token injection" mean?',
+    faq_a4:'When you send a message to an AI API, the relay may secretly prepend a hidden system prompt. This injects extra tokens into your request — for example, 3200 tokens of instructions telling the model to behave as "Kiro" instead of Claude. You pay for these hidden tokens, and worse, they can override your own instructions. api-relay-audit detects this by comparing actual token counts against expected values: if you sent 100 tokens but the model reports using 3300, there are ~3200 tokens of injection. Similar to hvoy.ai\'s "掺水率" (dilution rate) concept, but measured as an absolute token delta for precision.',
+    faq_q5:"What is AC-1.a tool-call rewriting?",
+    faq_a5:'AC-1.a (from the threat taxonomy in arXiv:2604.08407) is a supply-chain attack where the relay modifies package names in the model\'s response. For example, the model says <code>pip install requests==2.31.0</code>, but the relay changes it to a typosquatted package. If you\'re using Claude Code or an AI coding agent that automatically installs packages, this is a real attack vector. api-relay-audit sends pinned package-install commands and compares received text character-by-character to detect any modification.',
+    faq_q6:'What does "inconclusive" mean in the tri-state verdict?',
+    faq_a6:'Every audit step returns one of three states: <strong>clean</strong> (no anomaly detected), <strong>anomaly</strong> (issue confirmed), or <strong>inconclusive</strong> (the test couldn\'t determine a result — e.g., the relay blocked the probe or returned an error). This is important because "couldn\'t test" and "confirmed safe" are very different things. A relay that blocks all probes gets "inconclusive," not "clean." Numeric scoring systems (0-100) blur this distinction — a blocked test might score 50, which looks like "okay" when it should mean "suspicious."',
+    faq_q7:"Does this work with non-Claude models?",
+    faq_a7:'Most steps (1-9) work with any model through any relay. Step 10 (stream integrity) is Anthropic-specific because it validates Anthropic\'s SSE event schema, usage fields, and thinking signatures. Step 11 (Web3 injection) is model-agnostic but profile-gated. If your relay uses OpenAI format, the tool auto-detects and adapts the request format. Stream integrity will return "inconclusive" for non-Anthropic formats.',
+    footer_threat:"Threat model: "
+  }
+};
+
+
+function t(key){
+  return (i18n[currentLang]&&i18n[currentLang][key])||i18n.en[key]||key;
+}
+
+function setLang(lang){
+  currentLang=lang;
+  document.querySelectorAll('.lang-btn').forEach(b=>b.classList.toggle('active',b.textContent.trim()==={zh:'中',en:'EN'}[lang]));
+  document.documentElement.lang={zh:'zh-CN',en:'en'}[lang];
+  // Update all data-i18n elements
+  document.querySelectorAll('[data-i18n]').forEach(el=>{
+    const key=el.getAttribute('data-i18n');
+    const val=t(key);
+    if(val){
+      if(val.includes('<')){el.innerHTML=val}else{el.textContent=val}
+    }
+  });
+  // Re-render demo
+  showDemo(currentDemo);
+}
+
+// ── Init ──
+document.addEventListener('DOMContentLoaded',()=>{
+  setLang('zh');
+  showDemo(0);
 });
 </script>
 </body>
