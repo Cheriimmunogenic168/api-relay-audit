@@ -541,7 +541,7 @@ class APIClient:
         """
         if self._transparent_logger is None:
             return
-        from api_relay_audit.transparent_log import sha256hex
+        from api_relay_audit.transparent_log import sha256hex, redact_error
         # Pre-computed digest from stream hashing is a 64-char hex string.
         if isinstance(response_body_bytes, str) and len(response_body_bytes) == 64:
             try:
@@ -564,7 +564,7 @@ class APIClient:
             "tls_cipher": None,    # deferred to follow-up commit
             "elapsed_seconds": round(elapsed, 3),
             "transport": "curl" if self._use_curl else "httpx",
-            "error": error,
+            "error": redact_error(error),
         }
         self._transparent_logger.log_entry(entry)
 

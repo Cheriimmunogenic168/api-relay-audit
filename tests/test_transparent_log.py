@@ -7,7 +7,7 @@ import tempfile
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 
-from api_relay_audit.transparent_log import TransparentLogger, sha256hex
+from api_relay_audit.transparent_log import TransparentLogger, redact_error, sha256hex
 from api_relay_audit.client import APIClient, _parse_sse_stream
 from api_relay_audit.stream_integrity import StreamSignals
 
@@ -36,6 +36,40 @@ class TestSha256Hex:
         result = sha256hex("test data")
         assert len(result) == 64
         int(result, 16)  # must parse as hex
+
+
+# ---------------------------------------------------------------------------
+# TransparentLogger
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# redact_error (HIGH fix: no response body in error field)
+# ---------------------------------------------------------------------------
+
+class TestRedactError:
+    def test_none_returns_none(self):
+        assert redact_error(None) is None
+
+    def test_http_error_strips_body(self):
+        """'HTTP 400: {"error":"sk-real-key"}' → 'HTTP 400'"""
+        assert redact_error('HTTP 400: {"error":"sk-real-secret"}') == "HTTP 400"
+
+    def test_http_error_no_colon(self):
+        assert redact_error("HTTP 500") == "HTTP 500"
+
+    def test_curl_error_strips_stderr(self):
+        assert redact_error("curl failed: SSL handshake error") == "curl failed"
+
+    def test_exception_passthrough(self):
+        assert redact_error("connection refused") == "connection refused"
+
+    def test_timeout_passthrough(self):
+        assert redact_error("curl stream timeout") == "curl stream timeout"
+
+    def test_api_key_never_survives(self):
+        """The exact attack: relay echoes the API key in a 401 error."""
+        raw = "HTTP 401: {\"error\":\"invalid key sk-ant-abc123\"}"
+        assert "sk-ant" not in redact_error(raw)
 
 
 # ---------------------------------------------------------------------------
@@ -98,6 +132,14 @@ class TestTransparentLogger:
         logger = TransparentLogger(path)
         logger.close()
         logger.close()  # must not raise
+
+    def test_creates_parent_directories(self, tmp_path):
+        """MEDIUM fix: nested path like /a/b/c/audit.jsonl must not crash."""
+        path = str(tmp_path / "deep" / "nested" / "dir" / "audit.jsonl")
+        logger = TransparentLogger(path)
+        logger.log_entry({"test": True})
+        logger.close()
+        assert os.path.exists(path)
 
 
 # ---------------------------------------------------------------------------
@@ -194,6 +236,21 @@ class TestClientLogIntegration:
             mock.return_value = {
                 "text": "hello", "input_tokens": 10,
                 "output_tokens": 5, "raw": {},
+            }
+            client.call([{"role": "user", "content": "hi"}])
+        logger.close()
+
+        full_text = open(path).read()
+        assert "sk-test-key" not in full_text
+
+    def test_no_api_key_in_error_path(self, tmp_path):
+        """HIGH fix: even when the relay echoes the API key in an error
+        response, the key must NOT appear in the JSONL error field."""
+        client, logger, path = self._make_client(tmp_path)
+        client._format = "anthropic"
+        with patch.object(client, "_call_with_detection") as mock:
+            mock.return_value = {
+                "error": 'HTTP 401: {"detail":"invalid key sk-test-key"}',
             }
             client.call([{"role": "user", "content": "hi"}])
         logger.close()

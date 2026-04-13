@@ -200,7 +200,7 @@ def _build_strict_pattern(keyword):
 # instructor" from matching while "I am Warp, an AI assistant" still does.
 _IDENTITY_SUFFIX_PATTERN = (
     r"(?:"
-    r"\s*[,.:;!?)\-—]"
+    r"\s*[,.:;!?)\-—，。！？；）]"   # half-width + CJK full-width punctuation
     r"|\s+(?:assistant|ai|model|bot|chatbot|agent|by|from|made|created|"
     r"developed|built|designed|trained|powered|an?\s)"
     r"|\s*$"
@@ -258,6 +258,7 @@ _CJK_KEYWORDS = tuple(
 _CJK_ANCHOR_ALTERNATION = (
     r"我是|我叫|本人是|我的名字是?|我是一个|我是个|本 ?ai"
 )
+# Regular strict keywords: CJK anchor + keyword (no suffix needed).
 _CJK_STRICT_PATTERNS = tuple(
     (kw, re.compile(
         r"(?:" + _CJK_ANCHOR_ALTERNATION + r")"
@@ -266,7 +267,20 @@ _CJK_STRICT_PATTERNS = tuple(
         re.IGNORECASE,
     ))
     for kw in NON_CLAUDE_IDENTITY_KEYWORDS
-    if kw in _STRICT_ASCII_KEYWORDS or kw in _CONTEXT_STRICT_KEYWORDS
+    if kw in _STRICT_ASCII_KEYWORDS
+)
+# Context-strict keywords: CJK anchor + keyword + identity suffix.
+# Without the suffix, "我是warp speed模式" would false-positive.
+_CJK_CONTEXT_STRICT_PATTERNS = tuple(
+    (kw, re.compile(
+        r"(?:" + _CJK_ANCHOR_ALTERNATION + r")"
+        r"\s*"
+        + re.escape(kw) + r"(?![a-zA-Z])"
+        + _IDENTITY_SUFFIX_PATTERN,
+        re.IGNORECASE,
+    ))
+    for kw in NON_CLAUDE_IDENTITY_KEYWORDS
+    if kw in _CONTEXT_STRICT_KEYWORDS
 )
 
 
@@ -319,9 +333,12 @@ def find_non_claude_identities(text: str) -> list:
     for keyword, pattern in _CONTEXT_STRICT_PATTERNS:
         if pattern.search(text):
             matched.append(keyword)
-    # v1.7.7: CJK-anchor supplementary check for strict/context-strict
-    # keywords. A keyword already matched above won't be double-added.
+    # v1.7.7: CJK-anchor supplementary check for strict keywords.
     for keyword, pattern in _CJK_STRICT_PATTERNS:
+        if keyword not in matched and pattern.search(text):
+            matched.append(keyword)
+    # v1.7.7: CJK-anchor + identity suffix for context-strict keywords.
+    for keyword, pattern in _CJK_CONTEXT_STRICT_PATTERNS:
         if keyword not in matched and pattern.search(text):
             matched.append(keyword)
     for keyword, pattern in _LAX_ASCII_PATTERNS:

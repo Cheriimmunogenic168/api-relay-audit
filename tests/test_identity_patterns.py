@@ -484,6 +484,20 @@ class TestCJKNoWhitespace:
         """Chinese prose mentioning warp without identity anchor: no match."""
         assert find_non_claude_identities("曲速warp引擎是科幻概念。") == []
 
+    def test_chinese_anchor_warp_speed_no_false_positive(self):
+        """v1.7.7 Codex fix: CJK path must also enforce context-strict
+        identity suffix. '我是warp speed模式' has CJK anchor + keyword
+        but 'speed' is not an identity suffix."""
+        assert find_non_claude_identities("我是warp speed模式。") == []
+
+    def test_chinese_anchor_windsurf_instructor_no_false_positive(self):
+        """v1.7.7 Codex fix: '我叫windsurf instructor' must not match."""
+        assert find_non_claude_identities("我叫windsurf instructor。") == []
+
+    def test_chinese_anchor_warp_with_identity_suffix(self):
+        """CJK context-strict: '我是Warp，' (comma after) → match."""
+        assert "warp" in find_non_claude_identities("我是Warp，一个AI助手。")
+
 
 # ---------------------------------------------------------------------------
 # v1.7.7: Filler cap expansion {0,4} → {0,6} (ROADMAP residual #2)
