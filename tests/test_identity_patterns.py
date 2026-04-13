@@ -412,3 +412,92 @@ class TestWarpWindsurfChannels:
             "coding tools like Warp and Windsurf if you want."
         )
         assert find_non_claude_identities(text) == []
+
+
+# ---------------------------------------------------------------------------
+# v1.7.7: CJK no-whitespace fix (ROADMAP residual #1)
+#
+# Chinese has no whitespace convention between words. "我是GPT-5"
+# (zero spaces between CJK anchor and ASCII keyword) must match.
+# ---------------------------------------------------------------------------
+
+class TestCJKNoWhitespace:
+    def test_chinese_anchor_no_space_gpt(self):
+        """我是GPT-5 (zero space) must match gpt."""
+        assert "gpt" in find_non_claude_identities("我是GPT-5")
+
+    def test_chinese_anchor_with_space_still_works(self):
+        """我是 GPT-5 (with space) must still match — regression guard."""
+        assert "gpt" in find_non_claude_identities("我是 GPT-5, 由 OpenAI 创建")
+
+    def test_chinese_anchor_no_space_kiro(self):
+        """我是Kiro (zero space) must match kiro."""
+        assert "kiro" in find_non_claude_identities("我是Kiro，一个AI助手。")
+
+    def test_chinese_anchor_no_space_warp(self):
+        """我叫Warp (zero space) must match warp."""
+        assert "warp" in find_non_claude_identities("我叫Warp，很高兴为你服务。")
+
+    def test_chinese_anchor_no_space_aws(self):
+        """我是AWS Bedrock的模型 must match aws."""
+        assert "aws" in find_non_claude_identities("我是AWS Bedrock的Claude模型。")
+
+    def test_chinese_anchor_no_space_grok(self):
+        """我是Grok must match grok."""
+        assert "grok" in find_non_claude_identities("我是Grok，由xAI开发。")
+
+    def test_chinese_no_space_does_not_affect_english(self):
+        """English 'I amGPT' (no space, typo) should NOT match because
+        \\b fails between two ASCII word chars."""
+        assert find_non_claude_identities("I amGPT model") == []
+
+    def test_chinese_prose_warp_no_false_positive(self):
+        """Chinese prose mentioning warp without identity anchor: no match."""
+        assert find_non_claude_identities("曲速warp引擎是科幻概念。") == []
+
+
+# ---------------------------------------------------------------------------
+# v1.7.7: Filler cap expansion {0,4} → {0,6} (ROADMAP residual #2)
+#
+# Verbose self-identification with 5-6 filler words between anchor and
+# keyword must now be caught.
+# ---------------------------------------------------------------------------
+
+class TestFillerCapExpansion:
+    def test_five_filler_words_now_matched(self):
+        """'I'm an advanced conversational AI system called GPT-5'
+        has 5 filler words — was missed with {0,4}, now caught."""
+        text = "I'm an advanced conversational AI system called GPT-5."
+        assert "gpt" in find_non_claude_identities(text)
+
+    def test_six_filler_words_now_matched(self):
+        """6 filler words — edge of new cap."""
+        text = "I am a very large advanced language model called GPT-5."
+        assert "gpt" in find_non_claude_identities(text)
+
+    def test_seven_filler_words_not_matched(self):
+        """7 filler words — exceeds {0,6}, should NOT match via this
+        anchor (may still match via backup anchors in text)."""
+        text = "I'm a really very extremely large advanced conversational system GPT-5."
+        # "I'm" anchor + 7 fillers before GPT → too many
+        # No backup anchor in this text → no match
+        assert "gpt" not in find_non_claude_identities(text)
+
+    def test_four_filler_still_works(self):
+        """Regression: 4 filler words (previous cap) still works."""
+        text = "I am a large language model GPT-5."
+        assert "gpt" in find_non_claude_identities(text)
+
+    def test_negation_still_blocked_with_new_cap(self):
+        """Raising the cap must not break negation filtering."""
+        text = "I am Claude not a replacement for GPT."
+        assert "gpt" not in find_non_claude_identities(text)
+
+    def test_backup_anchor_still_catches_very_verbose(self):
+        """Even with >6 fillers from 'I'm', a backup anchor like
+        'fine-tuned by' catches the keyword within its own window."""
+        text = (
+            "I'm an advanced conversational AI system "
+            "fine-tuned by OpenAI called GPT-5."
+        )
+        assert "gpt" in find_non_claude_identities(text)

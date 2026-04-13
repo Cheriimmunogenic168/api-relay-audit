@@ -1044,7 +1044,7 @@ def _build_non_claude_strict_pattern(kw):
     # "I am Claude not GPT" (no comma) is not matched.
     return re.compile(
         r"(?:" + _NON_CLAUDE_IDENTITY_ANCHOR_ALT + r")"
-        r"\s+(?:(?!not\s|isn'?t\s|aren'?t\s|wasn'?t\s|weren'?t\s|unlike\s)\w+\s+){0,4}?"
+        r"\s+(?:(?!not\s|isn'?t\s|aren'?t\s|wasn'?t\s|weren'?t\s|unlike\s)\w+\s+){0,6}?"
         r"\b" + re.escape(kw) + r"(?![a-zA-Z])",
         re.IGNORECASE,
     )
@@ -1064,6 +1064,23 @@ _NON_CLAUDE_CJK_KEYWORDS = tuple(
     kw for kw in NON_CLAUDE_IDENTITY_KEYWORDS if not kw.isascii()
 )
 
+# v1.7.7: CJK-anchor supplementary patterns for strict keywords.
+# Chinese has no whitespace convention, so "我是GPT-5" (zero spaces)
+# needs a separate pattern without \s+ and \b. ROADMAP residual #1.
+_NON_CLAUDE_CJK_ANCHOR_ALT = (
+    r"我是|我叫|本人是|我的名字是?|我是一个|我是个|本 ?ai"
+)
+_NON_CLAUDE_CJK_STRICT_PATTERNS = tuple(
+    (kw, re.compile(
+        r"(?:" + _NON_CLAUDE_CJK_ANCHOR_ALT + r")"
+        r"\s*"
+        + re.escape(kw) + r"(?![a-zA-Z])",
+        re.IGNORECASE,
+    ))
+    for kw in NON_CLAUDE_IDENTITY_KEYWORDS
+    if kw in _NON_CLAUDE_STRICT_KEYWORDS
+)
+
 
 def find_non_claude_identities(text):
     """Return sorted list of non-Claude identity keywords found in text.
@@ -1077,6 +1094,10 @@ def find_non_claude_identities(text):
     matched = []
     for kw, pattern in _NON_CLAUDE_STRICT_PATTERNS:
         if pattern.search(text):
+            matched.append(kw)
+    # v1.7.7: CJK-anchor supplementary check for strict keywords.
+    for kw, pattern in _NON_CLAUDE_CJK_STRICT_PATTERNS:
+        if kw not in matched and pattern.search(text):
             matched.append(kw)
     for kw, pattern in _NON_CLAUDE_LAX_PATTERNS:
         if pattern.search(text):

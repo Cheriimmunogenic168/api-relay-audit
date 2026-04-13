@@ -173,10 +173,14 @@ def _build_strict_pattern(keyword):
 
     The trailing ``(?![a-zA-Z])`` preserves the v1.6.2 version-suffix
     fix so ``GPT4`` still matches.
+
+    **v1.7.7 fix**: filler cap raised from ``{0,4}`` to ``{0,6}`` to
+    catch verbose self-IDs like ``"I'm an advanced conversational AI
+    system called GPT-5"`` (5 filler words). ROADMAP residual #2.
     """
     return re.compile(
         r"(?:" + _IDENTITY_ANCHOR_ALTERNATION + r")"
-        r"\s+(?:(?!not\s|isn'?t\s|aren'?t\s|wasn'?t\s|weren'?t\s|unlike\s)\w+\s+){0,4}?"
+        r"\s+(?:(?!not\s|isn'?t\s|aren'?t\s|wasn'?t\s|weren'?t\s|unlike\s)\w+\s+){0,6}?"
         r"\b" + re.escape(keyword) + r"(?![a-zA-Z])",
         re.IGNORECASE,
     )
@@ -197,6 +201,28 @@ _LAX_ASCII_PATTERNS = tuple(
 )
 _CJK_KEYWORDS = tuple(
     kw for kw in NON_CLAUDE_IDENTITY_KEYWORDS if not kw.isascii()
+)
+
+# v1.7.7: CJK-anchor supplementary patterns for strict keywords.
+# Chinese has no whitespace convention between words, so "我是GPT-5"
+# (zero spaces) must also match. The main _STRICT_ASCII_PATTERNS regex
+# requires \s+ after the anchor and \b before the keyword — both fail
+# when a CJK character directly precedes an ASCII keyword. These
+# supplementary patterns use CJK-only anchors + \s* (zero-or-more
+# whitespace) and drop \b (unnecessary after a CJK char). ROADMAP
+# residual #1.
+_CJK_ANCHOR_ALTERNATION = (
+    r"我是|我叫|本人是|我的名字是?|我是一个|我是个|本 ?ai"
+)
+_CJK_STRICT_PATTERNS = tuple(
+    (kw, re.compile(
+        r"(?:" + _CJK_ANCHOR_ALTERNATION + r")"
+        r"\s*"
+        + re.escape(kw) + r"(?![a-zA-Z])",
+        re.IGNORECASE,
+    ))
+    for kw in NON_CLAUDE_IDENTITY_KEYWORDS
+    if kw in _STRICT_ASCII_KEYWORDS
 )
 
 
@@ -243,6 +269,11 @@ def find_non_claude_identities(text: str) -> list:
     matched = []
     for keyword, pattern in _STRICT_ASCII_PATTERNS:
         if pattern.search(text):
+            matched.append(keyword)
+    # v1.7.7: CJK-anchor supplementary check for strict keywords.
+    # A strict keyword already matched above won't be double-added.
+    for keyword, pattern in _CJK_STRICT_PATTERNS:
+        if keyword not in matched and pattern.search(text):
             matched.append(keyword)
     for keyword, pattern in _LAX_ASCII_PATTERNS:
         if pattern.search(text):
