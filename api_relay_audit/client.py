@@ -4,9 +4,11 @@ Shared API client with auto-detection (Anthropic / OpenAI) and curl fallback.
 Eliminates duplicated API calling logic across scripts.
 """
 
+import hashlib
 import json
 import subprocess
 import time
+from datetime import datetime, timezone
 
 import httpx
 
@@ -200,7 +202,8 @@ def _process_sse_line(line: str, signals: StreamSignals) -> bool:
     return False
 
 
-def _parse_sse_stream(byte_iterator, signals: StreamSignals) -> None:
+def _parse_sse_stream(byte_iterator, signals: StreamSignals,
+                      hasher=None) -> None:
     """Consume a byte iterator and populate ``signals`` with every
     SSE event it contains.
 
@@ -220,10 +223,22 @@ def _parse_sse_stream(byte_iterator, signals: StreamSignals) -> None:
     - Adversarial streams that send >1 MB without a newline —
       ``transport_error`` is set and parsing bails (v1.7.1)
 
+    Args:
+        hasher: Optional ``hashlib`` hash object. When not None, every
+            raw chunk is fed to ``hasher.update()`` for incremental
+            SHA-256 of the full stream (v1.7.7 transparent-log support).
+
     Never raises. Mutates ``signals`` in place.
     """
     buffer = ""
     for chunk in byte_iterator:
+        # v1.7.7: incremental stream hashing for transparent-log.
+        if hasher is not None:
+            if isinstance(chunk, (bytes, bytearray)):
+                hasher.update(chunk)
+            else:
+                hasher.update(chunk.encode("utf-8", errors="ignore"))
+
         if isinstance(chunk, (bytes, bytearray)):
             buffer += chunk.decode("utf-8", errors="ignore")
         else:
@@ -287,6 +302,7 @@ class APIClient:
         self.verbose = verbose
         self._format = None   # "anthropic" | "openai" | None (auto)
         self._use_curl = False
+        self._transparent_logger = None  # Optional[TransparentLogger]
 
     @property
     def detected_format(self):
@@ -417,12 +433,36 @@ class APIClient:
             ...     print(result["text"])
         """
         start = time.time()
+        request_body = json.dumps({"model": self.model, "max_tokens": max_tokens,
+                                   "messages": messages, "system": system or ""})
         try:
             result = self._call_with_detection(messages, system, max_tokens)
             result["time"] = time.time() - start
+            # v1.7.7 transparent-log
+            self._log_transparent(
+                "call", self._resolve_call_url(), "POST",
+                request_body, json.dumps(result.get("raw", {})),
+                200 if "error" not in result else 0,
+                None, result["time"], result.get("error"))
             return result
         except Exception as e:
-            return {"error": str(e), "time": time.time() - start}
+            elapsed = time.time() - start
+            self._log_transparent(
+                "call", self._resolve_call_url(), "POST",
+                request_body, None, 0, None, elapsed, str(e))
+            return {"error": str(e), "time": elapsed}
+
+    def _resolve_call_url(self) -> str:
+        """Reconstruct the URL used by the last ``call()`` based on detected format."""
+        base = self.base_url
+        if self._format == "openai":
+            if not base.endswith("/v1"):
+                base += "/v1"
+            return base + "/chat/completions"
+        # anthropic or unknown — default to anthropic path
+        if base.endswith("/v1"):
+            base = base[:-3]
+        return base + "/v1/messages"
 
     def _call_with_detection(self, messages, system, max_tokens):
         # Already detected — use that format
@@ -482,6 +522,52 @@ class APIClient:
             return True
         return False
 
+    # -- Transparent forensic logging (v1.7.7, arXiv §7.3) -------------------
+
+    def set_transparent_logger(self, logger):
+        """Attach a :class:`TransparentLogger` to record every request."""
+        self._transparent_logger = logger
+
+    def _log_transparent(self, method_name: str, url: str,
+                         http_method: str, request_body_bytes,
+                         response_body_bytes, status_code: int,
+                         response_headers, elapsed: float,
+                         error=None):
+        """Write one JSONL entry if a transparent logger is attached.
+
+        ``response_body_bytes`` may be raw data (str/bytes — will be
+        hashed) or a pre-computed hex digest string from incremental
+        stream hashing (64-char hex — passed through as-is).
+        """
+        if self._transparent_logger is None:
+            return
+        from api_relay_audit.transparent_log import sha256hex
+        # Pre-computed digest from stream hashing is a 64-char hex string.
+        if isinstance(response_body_bytes, str) and len(response_body_bytes) == 64:
+            try:
+                int(response_body_bytes, 16)
+                resp_hash = response_body_bytes
+            except ValueError:
+                resp_hash = sha256hex(response_body_bytes)
+        else:
+            resp_hash = sha256hex(response_body_bytes)
+        entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "method": method_name,
+            "url": url,
+            "http_method": http_method,
+            "request_body_sha256": sha256hex(request_body_bytes),
+            "response_body_sha256": resp_hash,
+            "status_code": status_code,
+            "response_headers": response_headers,
+            "tls_version": None,   # deferred to follow-up commit
+            "tls_cipher": None,    # deferred to follow-up commit
+            "elapsed_seconds": round(elapsed, 3),
+            "transport": "curl" if self._use_curl else "httpx",
+            "error": error,
+        }
+        self._transparent_logger.log_entry(entry)
+
     def get_models(self):
         """Fetch the model list from the ``/v1/models`` endpoint.
 
@@ -511,6 +597,7 @@ class APIClient:
         if self._format == "anthropic":
             auth_variants.reverse()
 
+        start = time.time()
         for headers in auth_variants:
             try:
                 if self._use_curl:
@@ -520,15 +607,26 @@ class APIClient:
                     if r.returncode == 0:
                         data = json.loads(r.stdout).get("data", [])
                         if data:
+                            self._log_transparent(
+                                "get_models", url, "GET", None,
+                                json.dumps(data), 200, None,
+                                time.time() - start)
                             return data
                 else:
                     r = httpx.get(url, headers=headers, timeout=15)
                     if r.status_code == 200:
                         data = r.json().get("data", [])
                         if data:
+                            self._log_transparent(
+                                "get_models", url, "GET", None,
+                                r.text, 200, dict(r.headers),
+                                time.time() - start)
                             return data
             except Exception:
                 continue
+        self._log_transparent(
+            "get_models", url, "GET", None, None, 0, None,
+            time.time() - start, "all auth variants failed")
         return []
 
     # -- Raw request (Step 9 error-leakage probes) ----------------------------
@@ -565,8 +663,14 @@ class APIClient:
             base = base[:-3]
         url = base + path
 
+        start = time.time()
         if self._use_curl:
-            return self._curl_raw_request(method, url, headers, body, content_type, timeout)
+            result = self._curl_raw_request(method, url, headers, body, content_type, timeout)
+            self._log_transparent(
+                "raw_request", url, method, body, result.get("body"),
+                result.get("status", 0), result.get("headers"),
+                time.time() - start, result.get("error"))
+            return result
         try:
             r = httpx.request(
                 method=method,
@@ -575,18 +679,31 @@ class APIClient:
                 content=body,
                 timeout=timeout,
             )
-            return {
+            result = {
                 "status": r.status_code,
                 "headers": dict(r.headers),
                 "body": r.text,
                 "error": None,
             }
+            self._log_transparent(
+                "raw_request", url, method, body, r.text,
+                r.status_code, dict(r.headers),
+                time.time() - start)
+            return result
         except Exception as e:
             # On an SSL / connect error, transparently fall back to curl so
             # the audit can still inspect the relay's error surface even
             # under a self-signed certificate.
             if self._handle_ssl_error(e):
-                return self._curl_raw_request(method, url, headers, body, content_type, timeout)
+                result = self._curl_raw_request(method, url, headers, body, content_type, timeout)
+                self._log_transparent(
+                    "raw_request", url, method, body, result.get("body"),
+                    result.get("status", 0), result.get("headers"),
+                    time.time() - start, result.get("error"))
+                return result
+            self._log_transparent(
+                "raw_request", url, method, body, None,
+                0, None, time.time() - start, str(e))
             return {"status": 0, "headers": {}, "body": "", "error": str(e)}
 
     def _curl_raw_request(self, method: str, url: str, headers: dict,
@@ -673,22 +790,32 @@ class APIClient:
         }
 
         signals = StreamSignals()
+        # v1.7.7: incremental hasher for transparent-log stream SHA-256.
+        hasher = hashlib.sha256() if self._transparent_logger else None
+        request_body_json = json.dumps(body)
         start = time.time()
         try:
             if self._use_curl:
-                self._stream_via_curl(url, headers, body, timeout, signals)
+                self._stream_via_curl(url, headers, body, timeout, signals, hasher)
             else:
-                self._stream_via_httpx(url, headers, body, timeout, signals)
+                self._stream_via_httpx(url, headers, body, timeout, signals, hasher)
         except Exception as e:
             if signals.transport_error is None:
                 signals.transport_error = str(e)
         finally:
             signals.total_duration_seconds = time.time() - start
+            self._log_transparent(
+                "stream_call", url, "POST", request_body_json,
+                hasher.hexdigest() if hasher else None,
+                200 if signals.transport_error is None else 0,
+                None, signals.total_duration_seconds,
+                signals.transport_error)
 
         return signals
 
     def _stream_via_httpx(self, url: str, headers: dict, body: dict,
-                          timeout: int, signals: StreamSignals) -> None:
+                          timeout: int, signals: StreamSignals,
+                          hasher=None) -> None:
         """httpx branch of :meth:`stream_call`. SSL errors trigger a
         one-time fallback to the curl branch (mirroring :meth:`_post`)."""
         try:
@@ -706,15 +833,16 @@ class APIClient:
                             + (f": {err_body}" if err_body else "")
                         )
                         return
-                    _parse_sse_stream(response.iter_bytes(), signals)
+                    _parse_sse_stream(response.iter_bytes(), signals, hasher)
         except Exception as e:
             if self._handle_ssl_error(e):
-                self._stream_via_curl(url, headers, body, timeout, signals)
+                self._stream_via_curl(url, headers, body, timeout, signals, hasher)
                 return
             raise
 
     def _stream_via_curl(self, url: str, headers: dict, body: dict,
-                         timeout: int, signals: StreamSignals) -> None:
+                         timeout: int, signals: StreamSignals,
+                         hasher=None) -> None:
         """Curl branch of :meth:`stream_call`. Uses ``curl -N --no-buffer``
         to disable curl's own output buffering so SSE events are streamed
         to stdout as they arrive. The request body is piped via stdin."""
@@ -748,7 +876,7 @@ class APIClient:
                         break
                     yield chunk
 
-            _parse_sse_stream(iter_stdout(), signals)
+            _parse_sse_stream(iter_stdout(), signals, hasher)
             proc.wait(timeout=timeout + 10)
             if proc.returncode != 0:
                 # v1.7.1 Codex fix: ANY non-zero curl exit must set

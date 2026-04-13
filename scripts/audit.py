@@ -207,6 +207,10 @@ def parse_args():
                         "request-count-gated backdoors (AC-1.b). Default: 0")
     p.add_argument("--timeout", type=int, default=120, help="Request timeout in seconds")
     p.add_argument("--output", default=None, help="Report output path (markdown)")
+    p.add_argument("--transparent-log", default=None, metavar="PATH",
+                   help="Path to an append-only JSONL forensic log (arXiv §7.3). "
+                        "Every API request is recorded with timestamp, URL, "
+                        "SHA-256 of request/response, and status code.")
     return p.parse_args()
 
 
@@ -992,6 +996,13 @@ def main():
     client = APIClient(args.url, args.key, args.model, timeout=args.timeout)
     report = Reporter()
 
+    # v1.7.7: transparent forensic log (arXiv §7.3)
+    _transparent_logger = None
+    if args.transparent_log:
+        from api_relay_audit.transparent_log import TransparentLogger
+        _transparent_logger = TransparentLogger(args.transparent_log)
+        client.set_transparent_logger(_transparent_logger)
+
     print(f"\n{'=' * 60}")
     print(f"  API Relay Security Audit")
     print(f"  Target: {client.base_url}")
@@ -1273,6 +1284,11 @@ def main():
     else:
         print(f"\n{'=' * 60}")
         print(md)
+
+    # Close transparent log
+    if _transparent_logger is not None:
+        _transparent_logger.close()
+        print(f"\n  Transparent log: {args.transparent_log}")
 
     print(f"\n{'=' * 60}")
     print("  Audit complete")
