@@ -2,7 +2,7 @@ name: Claude Issue Triage (Draft Reply)
 
 on:
   issues:
-    types: [opened, reopened]
+    types: [opened]
 
 jobs:
   draft-reply:
