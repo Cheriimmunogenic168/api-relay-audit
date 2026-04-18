@@ -119,3 +119,73 @@ def test_standalone_find_non_claude_identities_behaves_like_modular():
         assert modular_fn(text) == standalone_fn(text), (
             f"Divergent identity-match output for probe: {text!r}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Step 12 / Step 13 (v1.8) constants parity
+# ---------------------------------------------------------------------------
+
+def test_infra_fingerprint_constants_parity():
+    """Regression (v1.8, Codex LOW finding 2026-04-18): Step 12
+    fingerprinting constants must match between the modular and
+    standalone distributions. Changing a signal, a precedence order,
+    or the body scan cap on one side without the other would silently
+    bifurcate detection behavior.
+    """
+    from api_relay_audit.infra_fingerprint import (
+        FRAMEWORK_SIGNATURES as MODULAR_SIGS,
+        INFORMATIVE_HEADERS as MODULAR_HEADERS,
+        _BODY_SCAN_LIMIT as MODULAR_LIMIT,
+    )
+
+    standalone = _load_standalone_audit()
+
+    assert standalone.FRAMEWORK_SIGNATURES == MODULAR_SIGS, (
+        "FRAMEWORK_SIGNATURES drift between api_relay_audit/infra_fingerprint.py "
+        "and standalone audit.py. Mirror the change into both -- signal order "
+        "matters (specific frameworks before generic ones)."
+    )
+    assert standalone.INFORMATIVE_HEADERS == MODULAR_HEADERS, (
+        "INFORMATIVE_HEADERS drift between infra_fingerprint.py and standalone "
+        "audit.py. These headers are surfaced in the report for 'unknown' "
+        "classifications too; divergence leads to asymmetric reports."
+    )
+    assert standalone._BODY_SCAN_LIMIT == MODULAR_LIMIT, (
+        "_BODY_SCAN_LIMIT drift between infra_fingerprint.py and standalone "
+        "audit.py. Divergence would change detection on large landing pages."
+    )
+
+
+def test_latency_variance_constants_parity():
+    """Regression (v1.8, Codex LOW finding 2026-04-18): Step 13
+    latency-variance thresholds must match between the modular and
+    standalone distributions. A one-sided change to BIMODAL_GAP_THRESHOLD
+    or the CV cutoffs would silently produce different verdicts for
+    the same latency data depending on which distribution a user
+    installed.
+    """
+    from api_relay_audit.latency_variance import (
+        BIMODAL_GAP_THRESHOLD as MODULAR_BIMODAL,
+        CV_STABLE_CUTOFF as MODULAR_STABLE,
+        CV_VARIABLE_CUTOFF as MODULAR_VARIABLE,
+        DEFAULT_PROBE_COUNT as MODULAR_PROBE_COUNT,
+    )
+
+    standalone = _load_standalone_audit()
+
+    assert standalone.BIMODAL_GAP_THRESHOLD == MODULAR_BIMODAL, (
+        "BIMODAL_GAP_THRESHOLD drift between latency_variance.py and "
+        "standalone audit.py."
+    )
+    assert standalone.CV_STABLE_CUTOFF == MODULAR_STABLE, (
+        "CV_STABLE_CUTOFF drift between latency_variance.py and "
+        "standalone audit.py."
+    )
+    assert standalone.CV_VARIABLE_CUTOFF == MODULAR_VARIABLE, (
+        "CV_VARIABLE_CUTOFF drift between latency_variance.py and "
+        "standalone audit.py."
+    )
+    assert standalone.DEFAULT_PROBE_COUNT == MODULAR_PROBE_COUNT, (
+        "DEFAULT_PROBE_COUNT drift between latency_variance.py and "
+        "standalone audit.py."
+    )

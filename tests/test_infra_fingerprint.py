@@ -162,8 +162,15 @@ class TestAggregateFramework:
 
     def test_split_vote_picks_mode(self):
         """If two different frameworks each fire once, the mode wins
-        at tentative confidence. This also handles the corner case
-        where later probes pick up something the landing page missed.
+        at tentative confidence.
+
+        KNOWN LIMITATION (Codex review 2026-04-18, HIGH finding):
+        pure majority vote means generic edge-layer signals
+        (``Server: nginx``) can drown out app-layer hits when only
+        one probe catches the app framework. v1.8.1 may split
+        app-framework and edge-layer signals into separate fields;
+        this test documents current behavior so any future change
+        is explicit. See FOR_JOHN.md for the Pareto decision.
         """
         results = [
             {"framework": "one-api"},
@@ -250,3 +257,62 @@ class TestRunInfraFingerprint:
         client = self._make_client(responses)
         results = run_infra_fingerprint(client)
         assert len(results[0]["body_preview"]) == 200
+
+    def test_one_api_behind_cloudflare_aggregates_as_cloudflare(self):
+        """KNOWN LIMITATION (Codex review 2026-04-18, HIGH finding):
+        Cloudflare-fronted one-api has ``cf-ray`` on every probe and
+        one-api branding only on ``/``. Majority vote therefore
+        classifies the whole thing as cloudflare ``confirmed``.
+
+        The app-layer identity (one-api) is visible in the per-probe
+        result and can still be recovered; only the aggregate loses
+        it. v1.8.1 may separate app vs edge layers. This test locks
+        in the current behavior so any change is deliberate.
+        """
+        one_api_body = '<html><title>One API</title></html>'
+        responses = [
+            {"status": 200,
+             "headers": {"cf-ray": "abc-ord", "server": "cloudflare"},
+             "body": one_api_body,
+             "error": None},
+            {"status": 401,
+             "headers": {"cf-ray": "abc-ord", "server": "cloudflare"},
+             "body": "", "error": None},
+            {"status": 404,
+             "headers": {"cf-ray": "abc-ord", "server": "cloudflare"},
+             "body": "", "error": None},
+        ]
+        client = self._make_client(responses)
+        results = run_infra_fingerprint(client)
+        # Per-probe: landing still recognizes one-api before CF edge
+        assert results[0]["framework"] == "one-api"
+        assert results[1]["framework"] == "cloudflare"
+        assert results[2]["framework"] == "cloudflare"
+        # Aggregate: majority wins -> cloudflare confirmed
+        framework, confidence = aggregate_framework(results)
+        assert framework == "cloudflare"
+        assert confidence == "confirmed"
+
+    def test_new_api_behind_cloudflare_aggregates_as_cloudflare(self):
+        """Same as above but with a new-api landing page. New-api is
+        the highest-value app-layer hit per arXiv:2603.01919 Table 2
+        (most forks descend from it); losing it to CF edge is the
+        single costliest instance of the HIGH finding.
+        """
+        new_api_body = "<script src='https://github.com/Calcium-Ion/new-api'></script>"
+        responses = [
+            {"status": 200,
+             "headers": {"cf-ray": "xyz-sjc"},
+             "body": new_api_body,
+             "error": None},
+            {"status": 401,
+             "headers": {"cf-ray": "xyz-sjc"}, "body": "", "error": None},
+            {"status": 404,
+             "headers": {"cf-ray": "xyz-sjc"}, "body": "", "error": None},
+        ]
+        client = self._make_client(responses)
+        results = run_infra_fingerprint(client)
+        assert results[0]["framework"] == "new-api"
+        framework, confidence = aggregate_framework(results)
+        assert framework == "cloudflare"
+        assert confidence == "confirmed"

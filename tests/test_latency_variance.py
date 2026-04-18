@@ -223,3 +223,24 @@ class TestRunLatencyVariance:
         for call_args in client.call.call_args_list:
             kwargs = call_args.kwargs
             assert kwargs.get("max_tokens", 999) <= 16
+
+    def test_3_success_7_error_reaches_classified_verdict(self):
+        """Partial-success scenario (Codex review 2026-04-18 LOW
+        finding): 3 out of 10 probes succeed, 7 error out. Must
+        still reach a classified verdict (stable/variable/
+        high-variance/bimodal), not silently fall to inconclusive.
+
+        Count == 3 is the minimum for classify_variance to fire;
+        bimodality requires N>=4 so is_bimodal=False here, and the
+        verdict resolves via CV. Tests the boundary where the
+        verdict is just barely defensible."""
+        # Errors at 7 of 10 indices, successes at 0/3/6
+        client = self._make_client(n=10, errors_at={1, 2, 4, 5, 7, 8, 9})
+        result = run_latency_variance(client, count=10, sleep=0)
+        assert len(result["latencies"]) == 3
+        assert len(result["errors"]) == 7
+        assert result["verdict"] in (
+            "stable", "variable", "high-variance"
+        ), f"Expected CV-based verdict, got {result['verdict']!r}"
+        # bimodal verdict requires N>=4 samples, so must not fire here
+        assert result["bimodal"] is False
