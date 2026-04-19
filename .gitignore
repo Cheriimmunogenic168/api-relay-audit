@@ -24,3 +24,6 @@ Thumbs.db
 
 # Data (use data-example.json as template)
 web/data.json
+
+# Local reference PDFs (not committed — large, copyright)
+*.pdf

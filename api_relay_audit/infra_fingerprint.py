@@ -6,9 +6,9 @@ bodies. Pure passive detection -- no fraud inference in v1.8; the
 finding is informational and does NOT feed into the 6D risk matrix.
 
 Rationale: Zhang et al., *Real Money, Fake Models: Deceptive Model
-Claims in Shadow APIs*, arXiv:2603.01919, Table 2 reports that 11 of
-17 identified shadow APIs are built on OneAPI / NewAPI open-source
-backbones. Knowing the framework lets the user (a) assess the
+Claims in Shadow APIs*, arXiv:2603.01919, Section 3.2 Infrastructure
+reports that 11 of 17 identified shadow APIs are built on OneAPI
+and its derivative NewAPI open-source backbones. Knowing the framework lets the user (a) assess the
 operator's professionalism, (b) cross-reference known framework-level
 CVEs, and (c) distinguish first-party relays from plain reverse
 proxies. Paired with Step 13 Latency Variance, this section forms

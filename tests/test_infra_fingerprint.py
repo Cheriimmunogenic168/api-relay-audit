@@ -295,9 +295,9 @@ class TestRunInfraFingerprint:
 
     def test_new_api_behind_cloudflare_aggregates_as_cloudflare(self):
         """Same as above but with a new-api landing page. New-api is
-        the highest-value app-layer hit per arXiv:2603.01919 Table 2
-        (most forks descend from it); losing it to CF edge is the
-        single costliest instance of the HIGH finding.
+        a popular OneAPI derivative per arXiv:2603.01919 Section 3.2;
+        losing it to CF edge is the single costliest instance of the
+        HIGH finding.
         """
         new_api_body = "<script src='https://github.com/Calcium-Ion/new-api'></script>"
         responses = [

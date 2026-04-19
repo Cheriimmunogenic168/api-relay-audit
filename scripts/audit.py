@@ -955,9 +955,10 @@ def test_infra_fingerprint(client, report):
     cloudflare, raw nginx/caddy).
 
     Rationale: Zhang et al., *Real Money, Fake Models*, arXiv:2603.01919,
-    Table 2 reports that 11 of 17 identified shadow APIs are built on
-    OneAPI / NewAPI forks. Knowing the framework lets the user assess
-    operator professionalism and cross-reference framework-level CVEs.
+    Section 3.2 Infrastructure reports that 11 of 17 identified shadow
+    APIs are built on OneAPI and its derivative NewAPI. Knowing the
+    framework lets the user assess operator professionalism and
+    cross-reference framework-level CVEs.
 
     v1.8 classification is **informational only** -- the result does
     NOT feed into the 6D risk matrix. A future version may promote

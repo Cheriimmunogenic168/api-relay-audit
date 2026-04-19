@@ -98,8 +98,9 @@ Practice Guide and hvoy.ai `zzsting88/relayAPI` `claude_detector.py`.
 + hand-curated framework signature database (new-api, one-api, lobechat-relay,
 fastgpt, cloudflare, nginx-raw, caddy-raw) + majority-vote confidence
 (confirmed ≥2 hits / tentative 1 hit / unknown 0 hits).
-**Why**: Zhang et al., *Real Money, Fake Models*, arXiv:2603.01919, Table 2
-reports 11 of 17 identified shadow APIs are built on OneAPI/NewAPI forks.
+**Why**: Zhang et al., *Real Money, Fake Models*, arXiv:2603.01919,
+Section 3.2 Infrastructure reports 11 of 17 identified shadow APIs are
+built on OneAPI and its derivative NewAPI.
 Knowing the framework lets the operator cross-reference CVEs and assess
 professionalism.
 **Classification**: informational only — does NOT feed into the 6D risk matrix.
